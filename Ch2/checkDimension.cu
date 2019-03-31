@@ -1,11 +1,7 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 
-__global__ void checkIndex(void) {
-    printf("blockIdx (%d %d %d) threadIdx: (%d %d %d) gridDim (%d %d %d) blockDim (%d %d %d)\n",
-            blockIdx.x, blockIdx.y, blockIdx.z, threadIdx.x, threadIdx.y, threadIdx.z,
-            gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y, blockDim.z);
-}
+__global__ void checkIndex(void);
 
 int main(int argc, char **argv) {
     int nElem = 6;
@@ -26,4 +22,10 @@ int main(int argc, char **argv) {
     cudaDeviceReset();
 
     return 0;
+}
+
+__global__ void checkIndex(void) {
+    printf("blockIdx (%d %d %d) threadIdx: (%d %d %d) gridDim (%d %d %d) blockDim (%d %d %d)\n",
+            blockIdx.x, blockIdx.y, blockIdx.z, threadIdx.x, threadIdx.y, threadIdx.z,
+            gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y, blockDim.z);
 }
