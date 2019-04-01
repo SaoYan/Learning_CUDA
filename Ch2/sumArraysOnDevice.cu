@@ -95,7 +95,6 @@ __global__ void sumArraysOnDevice(float *A, float *B, float *C) {
     // 1D grid of 1D block
     // compute global thread index
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx == 2147483647) printf("%d\n", idx);
     C[idx] = A[idx] + B[idx];
 }
 
