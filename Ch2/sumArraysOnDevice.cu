@@ -10,19 +10,28 @@ void verifyResult(float *hostRes, float *deviceRes, int rows, int cols);
 __global__ void sumArraysOnDevice(float *A, float *B, float *C);
 
 int main(int argc, char **argv) {
-    int rows = 4096, cols = 1024;
+    // On current GPUs, a thread block may contain up to 1024 threads.
+    int rows = 409600, cols = 512;
     size_t nBytes = rows * cols * sizeof(float);
     clock_t start, end;
+    cudaError_t error;
+
+    // set up device 
+    int dev = 0; 
+    cudaSetDevice(dev);
 
     // allocate host memory
-    float *h_A, *h_B, *h_C;
+    float *h_A, *h_B, *h_C, *h_C_gpu;
     h_A = (float *) malloc(nBytes);
     h_B = (float *) malloc(nBytes);
     h_C = (float *) malloc(nBytes);
+    h_C_gpu = (float *) malloc(nBytes);
 
     // initial data (in CPU mem)
     initialData(h_A, rows, cols);
     initialData(h_B, rows, cols);
+    memset(h_C, 0, nBytes);
+    memset(h_C_gpu, 0, nBytes);
 
     // compute on CPU
     start = clock();
@@ -32,16 +41,18 @@ int main(int argc, char **argv) {
 
     // allocate device mem
     float *d_A, *d_B, *d_C;
-    cudaMalloc(&d_A, nBytes);
-    cudaMalloc(&d_B, nBytes);
-    cudaMalloc(&d_C, nBytes);
+    cudaMalloc((float**)&d_A, nBytes);
+    cudaMalloc((float**)&d_B, nBytes);
+    error = cudaMalloc((float**)&d_C, nBytes);
+    printf("Allocating GPU mem: %s\n", cudaGetErrorString(error));
 
     // copy data from CPU to GPU
     start = clock();
     cudaMemcpy(d_A, h_A, nBytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_B, h_B, nBytes, cudaMemcpyHostToDevice);
+    error = cudaMemcpy(d_B, h_B, nBytes, cudaMemcpyHostToDevice);
     end = clock();
     double copyTime = ((double) (end - start)) / CLOCKS_PER_SEC;
+    printf("Copying data CPU --> GPU: %s\n", cudaGetErrorString(error));
 
     // launch CUDA kernel
     dim3 block(cols);
@@ -51,9 +62,9 @@ int main(int argc, char **argv) {
     end = clock();
     double gpuTime = ((double) (end - start)) / CLOCKS_PER_SEC;
     
-    // // copy data from GPU back to CPU
-    float *h_C_gpu = (float *) malloc(nBytes);
-    cudaMemcpy(h_C_gpu, d_C, nBytes, cudaMemcpyDeviceToHost);
+    // copy data from GPU back to CPU
+    error = cudaMemcpy(h_C_gpu, d_C, nBytes, cudaMemcpyDeviceToHost);
+    printf("Copyint data GPU --> CPU: %s\n", cudaGetErrorString(error));
 
     // verify
     verifyResult(h_C, h_C_gpu, rows, cols);
@@ -81,8 +92,10 @@ int main(int argc, char **argv) {
 /**********CUDA kernels**********/
 
 __global__ void sumArraysOnDevice(float *A, float *B, float *C) {
-    int i = blockIdx.x, j = threadIdx.x, cols = blockDim.x;
-    int idx = i * cols + j;
+    // 1D grid of 1D block
+    // compute global thread index
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx == 2147483647) printf("%d\n", idx);
     C[idx] = A[idx] + B[idx];
 }
 
