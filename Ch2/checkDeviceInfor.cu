@@ -1,28 +1,21 @@
-#include "../common/common.h"
 #include <cuda_runtime.h>
 #include <stdio.h>
 
-/*
- * Display a variety of information on the first CUDA device in this system,
- * including driver version, runtime version, compute capability, bytes of
- * global memory, etc.
- */
+#define CHECK(call) {                                                        \
+    const cudaError_t error = call;                                          \
+    if (error != cudaSuccess) {                                              \
+        printf("Error: %s:%d, ", __FILE__, __LINE__);                        \
+        printf("code: %d, reason: %s\n", error, cudaGetErrorString(error));  \
+        exit(1);                                                             \
+    }                                                                        \
+}  
 
-int main(int argc, char **argv)
-{
-    printf("%s Starting...\n", argv[0]);
-
+int main(int argc, char **argv) {
     int deviceCount = 0;
     cudaGetDeviceCount(&deviceCount);
 
-    if (deviceCount == 0)
-    {
-        printf("There are no available device(s) that support CUDA\n");
-    }
-    else
-    {
-        printf("Detected %d CUDA Capable device(s)\n", deviceCount);
-    }
+    if (deviceCount == 0) printf("There are no available device(s) that support CUDA\n");
+    else printf("Detected %d CUDA Capable device(s)\n", deviceCount);
 
     int dev = 0, driverVersion = 0, runtimeVersion = 0;
     CHECK(cudaSetDevice(dev));
