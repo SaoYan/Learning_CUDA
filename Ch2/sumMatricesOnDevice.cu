@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 #include <cuda_runtime.h>
 
 void initialData(float *ip, int nx, int ny);

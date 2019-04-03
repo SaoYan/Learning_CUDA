@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <string.h>
 #include <time.h>
 #include <cuda_runtime.h>
 
@@ -67,6 +66,7 @@ int main(int argc, char **argv) {
     int threadPerBlock = 1024;
     dim3 block(threadPerBlock);
     dim3 grid((nElem+block.x-1)/block.x);
+    printf("Grid dimension %d Block dimensiton %d\n",grid.x, block.x);
     start = clock();
     sumArraysOnDevice<<<grid, block>>>(d_A, d_B, d_C, nElem);
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!

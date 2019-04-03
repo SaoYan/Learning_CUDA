@@ -30,6 +30,8 @@ int main(int argc, char **argv) {
            runtimeVersion / 1000, (runtimeVersion % 100) / 10);
     printf("  CUDA Capability Major/Minor version number:    %d.%d\n",
            deviceProp.major, deviceProp.minor);
+    printf("  Number of Multiprocessors:                     %d\n",
+           deviceProp.multiProcessorCount);
     printf("  Total amount of global memory:                 %.2f GBytes (%llu "
            "bytes)\n", (float)deviceProp.totalGlobalMem / pow(1024.0, 3),
            (unsigned long long)deviceProp.totalGlobalMem);
