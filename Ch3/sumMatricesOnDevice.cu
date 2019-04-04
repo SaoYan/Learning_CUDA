@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <string.h>
 #include <cuda_runtime.h>
 
 void initialData(float *ip, const int nx, const int ny);
@@ -64,6 +63,10 @@ int main(int argc, char **argv) {
 
     // launch CUDA kernel
     int dimx = 16, dimy = 16;
+    if (argc > 2) { // support input arg from terminal
+        dimx = atoi(argv[1]);
+        dimy = atoi(argv[2]);
+    }
     dim3 block(dimx, dimy);
     dim3 grid((nx + block.x - 1) / block.x, (ny + block.y - 1) / block.y);
     printf("Grid dimension (%d, %d) Block dimensiton (%d, %d)\n",grid.x, grid.y, block.x, block.y);
@@ -95,7 +98,6 @@ int main(int argc, char **argv) {
     
     // clean up all resources
     cudaDeviceReset();
-
     return 0;
 }
 
