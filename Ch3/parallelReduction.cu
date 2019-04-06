@@ -14,6 +14,8 @@ __global__ void reduceUnrolling2(int *g_idata, int * g_odata, const int n);
 __global__ void reduceUnrolling4(int *g_idata, int * g_odata, const int n);
 __global__ void reduceUnrolling8(int *g_idata, int * g_odata, const int n);
 
+__global__ void reduceUnrollWraps8(int *g_idata, int * g_odata, const int n);
+
 #define CHECK(call) {                                                        \
     const cudaError_t error = call;                                          \
     if (error != cudaSuccess) {                                              \
@@ -160,6 +162,20 @@ int main(int argc, char **argv) {
     end = clock();
     exeTime = ((double) (end - start)) / CLOCKS_PER_SEC;
     printf("GPU x8 unrolling:             execution time %.2f ms, result %d\n", exeTime * 1e3, reductionSum);
+
+    // 6. GPU - interleaved pair reduce; x8 unrolling; unrolling wraps
+    CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
+    start = clock();
+    // CUDA part
+    reduceUnrollWraps8<<<grid.x / 8, block>>>(d_idata, d_odata, evenSize);
+    CHECK(cudaDeviceSynchronize());
+    // Host part
+    reductionSum = 0;
+    CHECK(cudaMemcpy(h_odata, d_odata, grid.x / 8 * sizeof(int), cudaMemcpyDeviceToHost));
+    for (int i = 0; i < grid.x / 8; i++) reductionSum += h_odata[i];
+    end = clock();
+    exeTime = ((double) (end - start)) / CLOCKS_PER_SEC;
+    printf("GPU unrolling wraps:          execution time %.2f ms, result %d\n", exeTime * 1e3, reductionSum);
 
     // free host mem
     free(h_idata);
@@ -315,6 +331,69 @@ __global__ void reduceUnrolling8(int *g_idata, int * g_odata, const int n) {
             idata[tid] += idata[tid + stride];
         }
         __syncthreads(); 
+    }
+
+    if (tid == 0) g_odata[blockIdx.x] = idata[0];
+}
+
+__global__ void reduceUnrollWraps8(int *g_idata, int * g_odata, const int n) {
+    const int idx = blockIdx.x * blockDim.x * 8 + threadIdx.x;
+    if (idx >= n) return;
+    const int tid = threadIdx.x;
+
+    // convert global data pointer to the local pointer of this block
+    int *idata = g_idata + blockIdx.x * blockDim.x * 8;
+
+    // unrolling 8
+    if (idx + 7 * blockDim.x < n) {
+        int a1 = g_idata[idx];
+        int a2 = g_idata[idx + blockDim.x];
+        int a3 = g_idata[idx + 2 * blockDim.x];
+        int a4 = g_idata[idx + 3 * blockDim.x];
+        int a5 = g_idata[idx + 4 * blockDim.x];
+        int a6 = g_idata[idx + 5 * blockDim.x];
+        int a7 = g_idata[idx + 6 * blockDim.x];
+        int a8 = g_idata[idx + 7 * blockDim.x];
+        g_idata[idx] = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8;
+
+        // int a1 = idata[tid];
+        // int a2 = idata[tid + blockDim.x];
+        // int a3 = idata[tid + 2 * blockDim.x];
+        // int a4 = idata[tid + 3 * blockDim.x];
+        // int a5 = idata[tid + 4 * blockDim.x];
+        // int a6 = idata[tid + 5 * blockDim.x];
+        // int a7 = idata[tid + 6 * blockDim.x];
+        // int a8 = idata[tid + 7 * blockDim.x];
+        // idata[tid] = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8;
+
+        // volatile int *vmem = idata;
+        // vmem[tid] += vmem[tid + blockDim.x];
+        // vmem[tid] += vmem[tid + 2 * blockDim.x];
+        // vmem[tid] += vmem[tid + 3 * blockDim.x];
+        // vmem[tid] += vmem[tid + 4 * blockDim.x];
+        // vmem[tid] += vmem[tid + 5 * blockDim.x];
+        // vmem[tid] += vmem[tid + 6 * blockDim.x];
+        // vmem[tid] += vmem[tid + 7 * blockDim.x];
+    }
+    __syncthreads();
+
+    // in-place reduction in global memory
+    for (int stride = blockDim.x / 2; stride > 32; stride >>= 1) {
+        if (tid < stride) {
+            idata[tid] += idata[tid + stride];
+        }
+        __syncthreads(); 
+    }
+
+    // unrolling wrap
+    if (tid < 32) {
+        volatile int *vmem = idata;
+        vmem[tid] += vmem[tid + 32];
+        vmem[tid] += vmem[tid + 16];
+        vmem[tid] += vmem[tid +  8];
+        vmem[tid] += vmem[tid +  4];
+        vmem[tid] += vmem[tid +  2];
+        vmem[tid] += vmem[tid +  1];
     }
 
     if (tid == 0) g_odata[blockIdx.x] = idata[0];
