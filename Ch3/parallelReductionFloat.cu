@@ -13,6 +13,7 @@ __global__ void reduceInterleaved(float *g_idata, float * g_odata, const int n);
 __global__ void reduceUnrolling2(float *g_idata, float * g_odata, const int n);
 __global__ void reduceUnrolling4(float *g_idata, float * g_odata, const int n);
 __global__ void reduceUnrolling8(float *g_idata, float * g_odata, const int n);
+__global__ void reduceUnrolling16(float *g_idata, float * g_odata, const int n);
 
 __global__ void reduceUnrollWraps8(float *g_idata, float * g_odata, const int n);
 __global__ void reduceCompleteUnrollWarps8(float *g_idata, float * g_odata, const int n);
@@ -70,7 +71,7 @@ int main(int argc, char **argv) {
     // reductionSum = interleavedPairReduce(h_idata_cpy, evenSize);
     end = clock();
     exeTime = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("\nCPU reduce:                   execution time %.4f ms, result %f\n", exeTime * 1e3, reductionSum);
+    printf("\nCPU reduce:                   execution time %.4f ms, result %f\n\n", exeTime * 1e3, reductionSum);
 
     // allocate device memory
     float *d_idata, *d_odata;
@@ -108,7 +109,7 @@ int main(int argc, char **argv) {
     reductionSum = 0.0f;
     CHECK(cudaMemcpy(h_odata, d_odata, grid.x * sizeof(float), cudaMemcpyDeviceToHost));
     for (int i = 0; i < grid.x; i++) reductionSum += h_odata[i];
-    printf("GPU neighbored pair reduce 2: execution time %.4f ms, result %f\n", exeTime * 1e3, reductionSum);
+    printf("GPU neighbored pair reduce 2: execution time %.4f ms, result %f\n\n", exeTime * 1e3, reductionSum);
 
     // 3. GPU - interleaved pair reduce
     CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
@@ -166,6 +167,20 @@ int main(int argc, char **argv) {
     for (int i = 0; i < grid.x / 8; i++) reductionSum += h_odata[i];
     printf("GPU x8 unrolling:             execution time %.4f ms, result %f\n", exeTime * 1e3, reductionSum);
 
+    // 6.5. GPU - interleaved pair reduce; x16 unrolling
+    CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
+    start = clock();
+    // CUDA part
+    reduceUnrolling16<<<grid.x / 16, block>>>(d_idata, d_odata, evenSize);
+    CHECK(cudaDeviceSynchronize());
+    end = clock();
+    exeTime = ((double) (end - start)) / CLOCKS_PER_SEC;
+    // Host part
+    reductionSum = 0.0f;
+    CHECK(cudaMemcpy(h_odata, d_odata, grid.x / 16 * sizeof(float), cudaMemcpyDeviceToHost));
+    for (int i = 0; i < grid.x / 16; i++) reductionSum += h_odata[i];
+    printf("GPU x16 unrolling:            execution time %.4f ms, result %f\n\n", exeTime * 1e3, reductionSum);
+
     // 7. GPU - unrolling wraps
     CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
     start = clock();
@@ -192,7 +207,7 @@ int main(int argc, char **argv) {
     reductionSum = 0.0f;
     CHECK(cudaMemcpy(h_odata, d_odata, grid.x / 8 * sizeof(float), cudaMemcpyDeviceToHost));
     for (int i = 0; i < grid.x / 8; i++) reductionSum += h_odata[i];
-    printf("GPU complete unrolling:       execution time %.4f ms, result %f\n", exeTime * 1e3, reductionSum);
+    printf("GPU complete unrolling:       execution time %.4f ms, result %f\n\n", exeTime * 1e3, reductionSum);
 
     // 9. GPU - template function 
     CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
@@ -388,6 +403,47 @@ __global__ void reduceUnrolling8(float *g_idata, float * g_odata, const int n) {
     if (tid == 0) g_odata[blockIdx.x] = idata[0];
 }
 
+__global__ void reduceUnrolling16(float *g_idata, float * g_odata, const int n) {
+    const int idx = blockIdx.x * blockDim.x * 16 + threadIdx.x;
+    if (idx >= n) return;
+    const int tid = threadIdx.x;
+
+    // convert global data pointer to the local pointer of this block
+    float *idata = g_idata + blockIdx.x * blockDim.x * 16;
+
+    // unrolling 16
+    if (idx + 15 * blockDim.x < n) {
+        float a1 = g_idata[idx];
+        float a2 = g_idata[idx + blockDim.x];
+        float a3 = g_idata[idx + 2 * blockDim.x];
+        float a4 = g_idata[idx + 3 * blockDim.x];
+        float a5 = g_idata[idx + 4 * blockDim.x];
+        float a6 = g_idata[idx + 5 * blockDim.x];
+        float a7 = g_idata[idx + 6 * blockDim.x];
+        float a8 = g_idata[idx + 7 * blockDim.x];
+        float a9 = g_idata[idx + 8 * blockDim.x];
+        float a10 = g_idata[idx + 9 * blockDim.x];
+        float a11 = g_idata[idx + 10 * blockDim.x];
+        float a12 = g_idata[idx + 11 * blockDim.x];
+        float a13 = g_idata[idx + 12 * blockDim.x];
+        float a14 = g_idata[idx + 13 * blockDim.x];
+        float a15 = g_idata[idx + 14 * blockDim.x];
+        float a16 = g_idata[idx + 15 * blockDim.x];
+        g_idata[idx] = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + 
+            a9 + a10 + a11 + a12 + a13 + a14 + a15 + a16;
+    }
+    __syncthreads();
+
+    // in-place reduction in global memory
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (tid < stride) {
+            idata[tid] += idata[tid + stride];
+        }
+        __syncthreads(); 
+    }
+
+    if (tid == 0) g_odata[blockIdx.x] = idata[0];
+}
 
 __global__ void reduceUnrollWraps8(float *g_idata, float * g_odata, const int n) {
     const int idx = blockIdx.x * blockDim.x * 8 + threadIdx.x;
@@ -546,7 +602,7 @@ __global__ void reduceCompleteUnroll(float *g_idata, float * g_odata, const int 
 
 void initialData(float *ip, const int size) {
     for (int i = 0; i < size; i++) {
-        ip[i] = (float) (rand() & 0x1);
+        ip[i] = (float) (rand() & 0xFF);
     }
 }
 
