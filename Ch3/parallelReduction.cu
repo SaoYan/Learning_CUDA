@@ -53,7 +53,7 @@ int main(int argc, char **argv) {
     }
     dim3 block(blockSize);
     dim3 grid((evenSize + block.x - 1)/ block.x);
-    printf("Grid dimension %d Block dimensiton %d\n",grid.x, block.x);
+    printf("Grid dimension %d Block dimensiton %d\n", grid.x, block.x);
 
     // allocate host memory
     int *h_idata, *h_odata, *h_idata_cpy;
@@ -66,12 +66,12 @@ int main(int argc, char **argv) {
 
     // 0. compute on CPU
     start = clock();
-    // int cpuRes = naiveReduce(h_idata_cpy, evenSize);
-    // int cpuRes = neighboredPairReduce(h_idata_cpy, evenSize);
+    // reductionSum = naiveReduce(h_idata_cpy, size);
+    // reductionSum = neighboredPairReduce(h_idata_cpy, evenSize);
     reductionSum = interleavedPairReduce(h_idata_cpy, evenSize);
     end = clock();
     exeTime = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("\nCPU reduce:                   execution time %.2f ms, result %d\n", exeTime * 1e3, reductionSum);
+    printf("\nCPU reduce:                   execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
 
     // allocate device memory
     int *d_idata, *d_odata;
