@@ -89,12 +89,12 @@ int main(int argc, char **argv) {
     free(h_C_gpu);
 
     // free device mem
-    cudaFree(d_A);
-    cudaFree(d_B);
-    cudaFree(d_C);
+    CHECK(cudaFree(d_A));
+    CHECK(cudaFree(d_B));
+    CHECK(cudaFree(d_C));
     
     // clean up all resources
-    cudaDeviceReset();
+    CHECK(cudaDeviceReset());
 
     return 0;
 }

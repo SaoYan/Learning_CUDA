@@ -231,11 +231,11 @@ int main(int argc, char **argv) {
     free(h_idata_cpy);
 
     // free device mem
-    cudaFree(d_idata);
-    cudaFree(d_odata);
+    CHECK(cudaFree(d_idata));
+    CHECK(cudaFree(d_odata));
     
     // clean up all resources
-    cudaDeviceReset();
+    CHECK(cudaDeviceReset());
     return 0;
 }
 
