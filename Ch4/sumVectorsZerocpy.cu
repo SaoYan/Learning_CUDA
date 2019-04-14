@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <time.h>
 #include <cuda_runtime.h>
 
 void initialData(float *ip, const int N);
@@ -7,6 +6,7 @@ void sumArraysOnHost(float *A, float *B, float *C, const int N);
 void verifyResult(float *hostRes, float *deviceRes, const int N);
 
 __global__ void sumArraysOnDevice(float *A, float *B, float *C, const int N);
+__global__ void sumArraysZeroCopy(float *A, float *B, float *C, const int N);
 
 #define CHECK(call) {                                                        \
     const cudaError_t error = call;                                          \
@@ -17,12 +17,8 @@ __global__ void sumArraysOnDevice(float *A, float *B, float *C, const int N);
     }                                                                        \
 }                                                                            \
 
-int main(int argc, char **argv) {
-    int nElem = 1<<28;
-    size_t nBytes = nElem * sizeof(float);
-    clock_t start, end;
-    printf("Vector size %d\n", nElem);
-
+int main(int argc, char **argv)
+{
     // set up device
     int dev = 0;
     cudaDeviceProp deviceProp; 
@@ -30,73 +26,112 @@ int main(int argc, char **argv) {
     printf("Using Device %d: %s\n", dev, deviceProp.name); 
     CHECK(cudaSetDevice(dev));
 
-    // allocate host memory
-    float *h_A, *h_B, *h_C, *h_C_gpu;
-    h_A = (float *) malloc(nBytes);
-    h_B = (float *) malloc(nBytes);
-    h_C = (float *) malloc(nBytes);
-    h_C_gpu = (float *) malloc(nBytes);
+    // check if support mapped memory
+    if (!deviceProp.canMapHostMemory) {
+        printf("Device %d does not support mapping CPU host memory!\n", dev);
+        CHECK(cudaDeviceReset());
+        exit(EXIT_SUCCESS);
+    }
 
-    // initial data (in CPU mem)
+    // set up data size of vectors
+    int ipower = 10;
+    if (argc > 1) ipower = atoi(argv[1]);
+    int nElem = 1 << ipower;
+    size_t nBytes = nElem * sizeof(float);
+    if (ipower < 18) {
+        printf("Vector length: %d, data size:  %3.0f KB\n", nElem, (float)nBytes / 1024.0f);
+    }
+    else {
+        printf("Vector length: %d data size  %3.0f MB\n", nElem, (float)nBytes / (1024.0f * 1024.0f));
+    }
+
+    // part 1: using device memory
+    // malloc host memory
+    float *h_A, *h_B, *h_C, *h_C_gpu;
+    h_A     = (float *)malloc(nBytes);
+    h_B     = (float *)malloc(nBytes);
+    h_C     = (float *)malloc(nBytes);
+    h_C_gpu = (float *)malloc(nBytes);
+
+    // initialize data at host side
     initialData(h_A, nElem);
     initialData(h_B, nElem);
     memset(h_C, 0, nBytes);
-    memset(h_C_gpu, 0, nBytes);
+    memset(h_C_gpu,  0, nBytes);
 
     // compute on CPU
-    start = clock();
     sumArraysOnHost(h_A, h_B, h_C, nElem);
-    end = clock();
-    double cpuTime = ((double) (end - start)) / CLOCKS_PER_SEC;
 
-    // allocate device memory
+    // allocate device memory (global memory)
     float *d_A, *d_B, *d_C;
     CHECK(cudaMalloc((float**)&d_A, nBytes));
     CHECK(cudaMalloc((float**)&d_B, nBytes));
     CHECK(cudaMalloc((float**)&d_C, nBytes));
 
     // copy data from CPU to GPU
-    start = clock();
     CHECK(cudaMemcpy(d_A, h_A, nBytes, cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(d_B, h_B, nBytes, cudaMemcpyHostToDevice));
-    end = clock();
-    double copyTime = ((double) (end - start)) / CLOCKS_PER_SEC;
 
     // launch CUDA kernel
     int threadPerBlock = 1024;
-    dim3 block(threadPerBlock);
-    dim3 grid((nElem+block.x-1)/block.x);
-    printf("Grid dimension %d Block dimensiton %d\n",grid.x, block.x);
-    start = clock();
+    dim3 block (threadPerBlock);
+    dim3 grid((nElem + block.x - 1) / block.x);
     sumArraysOnDevice<<<grid, block>>>(d_A, d_B, d_C, nElem);
-    CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
-    end = clock();
-    double gpuTime = ((double) (end - start)) / CLOCKS_PER_SEC;
-    
+
     // copy data from GPU back to CPU
     CHECK(cudaMemcpy(h_C_gpu, d_C, nBytes, cudaMemcpyDeviceToHost));
 
-    // verify
+    // check results
     verifyResult(h_C, h_C_gpu, nElem);
-    printf("It takes %.4f sec to execute on CPU\n", cpuTime);
-    printf("It takes %.4f sec to copy data from CPU to GPU\n", copyTime);
-    printf("It takes %.4f sec to execute on GPU\n", gpuTime);
 
-    // free host mem
+    // free device global memory
+    CHECK(cudaFree(d_A));
+    CHECK(cudaFree(d_B));
+
+    // free host memory
     free(h_A);
     free(h_B);
+
+    // part 2: using zerocopy memory for array A and B
+    // allocate zerocpy memory
+    CHECK(cudaHostAlloc((void **)&h_A, nBytes, cudaHostAllocMapped));
+    CHECK(cudaHostAlloc((void **)&h_B, nBytes, cudaHostAllocMapped));
+
+    // initialize data at host side
+    initialData(h_A, nElem);
+    initialData(h_B, nElem);
+    memset(h_C, 0, nBytes);
+    memset(h_C_gpu,  0, nBytes);
+
+    // pass the pointer to device
+    CHECK(cudaHostGetDevicePointer((void **)&d_A, (void *)h_A, 0));
+    CHECK(cudaHostGetDevicePointer((void **)&d_B, (void *)h_B, 0));
+
+    // compute on CPU
+    sumArraysOnHost(h_A, h_B, h_C, nElem);
+
+    // execute kernel with zero copy memory
+    sumArraysZeroCopy<<<grid, block>>>(d_A, d_B, d_C, nElem);
+
+    // copy data from GPU back to CPU
+    CHECK(cudaMemcpy(h_C_gpu, d_C, nBytes, cudaMemcpyDeviceToHost));
+
+    // check device results
+    verifyResult(h_C, h_C_gpu, nElem);
+
+    // free  memory
+    CHECK(cudaFree(d_C));
+    CHECK(cudaFreeHost(h_A));
+    CHECK(cudaFreeHost(h_B));
     free(h_C);
     free(h_C_gpu);
 
-    // free device mem
-    CHECK(cudaFree(d_A));
-    CHECK(cudaFree(d_B));
-    CHECK(cudaFree(d_C));
-    
-    // clean up all resources
-    CHECK(cudaDeviceReset());
+    // cannot free d_A and d_B because they are already freed
+    // remember: in part 2 d_A and d_B refer to the same memory as h_A and h_B
 
-    return 0;
+    // reset device
+    CHECK(cudaDeviceReset());
+    return EXIT_SUCCESS;
 }
 
 /**********CUDA kernels**********/
@@ -104,6 +139,11 @@ int main(int argc, char **argv) {
 __global__ void sumArraysOnDevice(float *A, float *B, float *C, const int N) {
     // 1D grid of 1D block
     // compute global thread index
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < N) C[idx] = A[idx] + B[idx];
+}
+
+__global__ void sumArraysZeroCopy(float *A, float *B, float *C, const int N) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < N) C[idx] = A[idx] + B[idx];
 }
