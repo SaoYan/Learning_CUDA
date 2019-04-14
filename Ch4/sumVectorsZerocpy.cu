@@ -104,14 +104,16 @@ int main(int argc, char **argv)
     memset(h_C_gpu,  0, nBytes);
 
     // pass the pointer to device
-    CHECK(cudaHostGetDevicePointer((void **)&d_A, (void *)h_A, 0));
-    CHECK(cudaHostGetDevicePointer((void **)&d_B, (void *)h_B, 0));
+    // no need when using unified virtual addressing (UVA)
+    // CHECK(cudaHostGetDevicePointer((void **)&d_A, (void *)h_A, 0));
+    // CHECK(cudaHostGetDevicePointer((void **)&d_B, (void *)h_B, 0));
 
     // compute on CPU
     sumArraysOnHost(h_A, h_B, h_C, nElem);
 
     // execute kernel with zero copy memory
-    sumArraysZeroCopy<<<grid, block>>>(d_A, d_B, d_C, nElem);
+    // sumArraysZeroCopy<<<grid, block>>>(d_A, d_B, d_C, nElem);
+    sumArraysZeroCopy<<<grid, block>>>(h_A, h_B, d_C, nElem); // UVA
 
     // copy data from GPU back to CPU
     CHECK(cudaMemcpy(h_C_gpu, d_C, nBytes, cudaMemcpyDeviceToHost));
@@ -119,7 +121,7 @@ int main(int argc, char **argv)
     // check device results
     verifyResult(h_C, h_C_gpu, nElem);
 
-    // free  memory
+    // free memory
     CHECK(cudaFree(d_C));
     CHECK(cudaFreeHost(h_A));
     CHECK(cudaFreeHost(h_B));
