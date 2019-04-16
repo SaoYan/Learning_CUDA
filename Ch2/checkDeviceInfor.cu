@@ -82,6 +82,5 @@ int main(int argc, char **argv) {
     printf("  Maximum memory pitch:                          %lu bytes\n",
            deviceProp.memPitch);
 
-    // return 0;
     exit(EXIT_SUCCESS);
 }

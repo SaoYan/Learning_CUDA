@@ -27,7 +27,7 @@ int main(int argc, char **argv) {
     if (argc>1) offset = atoi(argv[1]);
 
     // set up device
-    int dev = 1;
+    int dev = 0;
     cudaDeviceProp deviceProp; 
     CHECK(cudaGetDeviceProperties(&deviceProp, dev)); 
     printf("Using Device %d: %s\n", dev, deviceProp.name); 
@@ -119,11 +119,9 @@ __global__ void sumArraysReadonlyCache(
     const float * __restrict__ B, 
     float * __restrict__ C, 
     const int N, const int offset) {
-    // 1D grid of 1D block
-    // compute global thread index
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int k = idx + offset;
-    if (k < N) C[idx] = A[k] + B[k];
+    if (k < N) C[idx] = __ldg(&A[k]) + __ldg(&B[k]);
 }
 
 /**********host functions**********/
