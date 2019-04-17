@@ -94,7 +94,7 @@ void sumArraysOnHost(float *A, float *B, float *C, const int N) {
 void verifyResult(float *hostRes, float *deviceRes, const int N) {
     double eps = 1e-8;
     for (int i = 0; i < N; i++) {
-        if (abs(hostRes[i] - deviceRes[i] > eps)) {
+        if (abs(hostRes[i] - deviceRes[i]) > eps) {
             printf("Arrays do not match:\n");
             printf("host %5.2f gpu %5.2f at array index %d\n", hostRes[i], deviceRes[i], i);
             return;

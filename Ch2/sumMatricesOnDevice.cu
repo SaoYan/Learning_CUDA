@@ -141,7 +141,7 @@ void verifyResult(float *hostRes, float *deviceRes, const int nx, const int ny) 
     for (int iy = 0; iy < ny; iy++) {
         for (int ix = 0; ix < nx; ix++) {
             int idx = iy * nx + ix;
-            if (abs(hostRes[idx] - deviceRes[idx] > eps)) {
+            if (abs(hostRes[idx] - deviceRes[idx]) > eps) {
                 printf("Arrays do not match! Check your kernel code!\n");
                 printf("host %5.2f gpu %5.2f at (%d, %d)\n", hostRes[idx], deviceRes[idx], nx, ny);
                 return;
