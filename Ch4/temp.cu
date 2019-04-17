@@ -2,15 +2,13 @@
 #include <cuda_runtime.h>
 
 void initialData(float *ip, const int N);
-void sumArraysOnHost(float *A, float *B, float *C, const int N, const int offset);
+void sumArraysOnHost(float *A, float *B, float *C, const int N);
 void verifyResult(float *hostRes, float *deviceRes, const int N);
 
-__global__ void warmup(float *A, float *B, float *C, const int N, const int offset);
-__global__ void sumArraysOnDeviceOffset(float *A, float *B, float *C, const int N, const int offset);
-__global__ void sumArraysOnDeviceOffsetUnroll2(float *A, float *B, float *C, const int N, const int offset);
-__global__ void sumArraysOnDeviceOffsetUnroll4(float *A, float *B, float *C, const int N, const int offset);
-
-__global__ void sumArraysReadonlyCache(const float * __restrict__ A, const float * __restrict__ B, float * __restrict__ C, const int N, const int offset);
+__global__ void warmup(float *A, float *B, float *C, const int N);
+__global__ void sumArraysOnDevice(float *A, float *B, float *C, const int N);
+__global__ void sumArraysOnDeviceUnroll2(float *A, float *B, float *C, const int n);
+__global__ void sumArraysOnDeviceUnroll4(float *A, float *B, float *C, const int n);
 
 #define CHECK(call) {                                                        \
     const cudaError_t error = call;                                          \
@@ -26,8 +24,6 @@ int main(int argc, char **argv) {
     if (argc>1) power = atoi(argv[1]);
     int blockSize = 512;
     if (argc>2) blockSize = atoi(argv[2]);
-    int offset = 0;
-    if (argc>3) offset = atoi(argv[3]);
 
     int nElem = 1<<power;
     size_t nBytes = nElem * sizeof(float);
@@ -56,7 +52,7 @@ int main(int argc, char **argv) {
 
     // compute on CPU
     start = clock();
-    sumArraysOnHost(h_A, h_B, h_C, nElem, offset);
+    sumArraysOnHost(h_A, h_B, h_C, nElem);
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
     printf("CPU execution: %.4f ms\n", time * 1000);
@@ -76,7 +72,7 @@ int main(int argc, char **argv) {
     dim3 grid((nElem+block.x-1)/block.x);
 
     // 0. warm up
-    warmup<<<grid, block>>>(d_A, d_B, d_C, nElem, offset);
+    warmup<<<grid, block>>>(d_A, d_B, d_C, nElem);
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
     CHECK(cudaGetLastError());
 
@@ -84,13 +80,11 @@ int main(int argc, char **argv) {
     cudaMemset(d_C, 0, nBytes);
     memset(h_C_gpu, 0, nBytes);
     start = clock();
-    sumArraysOnDeviceOffset<<<grid, block>>>(d_A, d_B, d_C, nElem, offset);
-    // sumArraysReadonlyCache<<<grid, block>>>(d_A, d_B, d_C, nElem, offset);
+    sumArraysOnDevice<<<grid, block>>>(d_A, d_B, d_C, nElem);
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("no unrolling <<< %4d, %4d >>> offset %d elapsed %f ms\n",
-        grid.x, block.x, offset, time * 1000);
+    printf("no unrolling <<< %4d, %4d >>> elapsed %f ms\n", grid.x, block.x, time * 1000);
     // check result
     CHECK(cudaMemcpy(h_C_gpu, d_C, nBytes, cudaMemcpyDeviceToHost));
     verifyResult(h_C, h_C_gpu, nElem);
@@ -99,12 +93,11 @@ int main(int argc, char **argv) {
     cudaMemset(d_C, 0, nBytes);
     memset(h_C_gpu, 0, nBytes);
     start = clock();
-    sumArraysOnDeviceOffsetUnroll2<<<grid.x / 2, block>>>(d_A, d_B, d_C, nElem, offset);
+    sumArraysOnDeviceUnroll2<<<grid.x / 2, block>>>(d_A, d_B, d_C, nElem);
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("unroll2      <<< %4d, %4d >>> offset %d elapsed %f ms\n",
-        grid.x / 2, block.x, offset, time * 1000);
+    printf("unroll2      <<< %4d, %4d >>> elapsed %f ms\n", grid.x / 2, block.x, time * 1000);
     
     // check result
     CHECK(cudaMemcpy(h_C_gpu, d_C, nBytes, cudaMemcpyDeviceToHost));
@@ -114,12 +107,11 @@ int main(int argc, char **argv) {
     cudaMemset(d_C, 0, nBytes);
     memset(h_C_gpu, 0, nBytes);
     start = clock();
-    sumArraysOnDeviceOffsetUnroll4<<<grid.x / 4, block>>>(d_A, d_B, d_C, nElem, offset);
+    sumArraysOnDeviceUnroll4<<<grid.x / 4, block>>>(d_A, d_B, d_C, nElem);
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("unroll4      <<< %4d, %4d >>> offset %d elapsed %f ms\n",
-        grid.x / 4, block.x, offset, time * 1000);
+    printf("unroll4      <<< %4d, %4d >>> elapsed %f ms\n", grid.x / 4, block.x, time * 1000);
     // check result
     CHECK(cudaMemcpy(h_C_gpu, d_C, nBytes, cudaMemcpyDeviceToHost));
     verifyResult(h_C, h_C_gpu, nElem);
@@ -142,58 +134,33 @@ int main(int argc, char **argv) {
 
 /**********CUDA kernels**********/
 
-__global__ void warmup(float *A, float *B, float *C, const int N, const int offset) {
+__global__ void warmup(float *A, float *B, float *C, const int N) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int k = idx + offset;
-    if (k < N) C[idx] = A[k] + B[k];
+    if (idx < N) C[idx] = A[idx] + B[idx];
 }
 
-__global__ void sumArraysOnDeviceOffset(
-    float *A, float *B, float *C, 
-    const int N, const int offset) {
+__global__ void sumArraysOnDevice(float *A, float *B, float *C, const int N) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int k = idx + offset;
-    if (k < N) C[idx] = A[k] + B[k];
+    if (idx < N) C[idx] = A[idx] + B[idx];
 }
 
-__global__ void sumArraysOnDeviceOffsetUnroll2(
-    float *A, float *B, float *C, 
-    const int N, const int offset) {
+__global__ void sumArraysOnDeviceUnroll2(float *A, float *B, float *C, const int N) {
     int idx = blockIdx.x * blockDim.x * 2 + threadIdx.x;
-    int k = idx + offset;
-    
-    if (k < N) C[idx] = A[k] + B[k];
-    if (k + blockDim.x < N) {
-        C[idx + blockDim.x] = A[k + blockDim.x] + B[k + blockDim.x];
+    if (idx + blockDim.x < N) {
+        C[idx] = A[idx] + B[idx];
+        C[idx + blockDim.x] = A[idx + blockDim.x] + B[idx + blockDim.x];
     }
 }
 
-__global__ void sumArraysOnDeviceOffsetUnroll4(
-    float *A, float *B, float *C, 
-    const int N, const int offset) {
+__global__ void sumArraysOnDeviceUnroll4(float *A, float *B, float *C, const int N) {
     int idx = blockIdx.x * blockDim.x * 4 + threadIdx.x;
-    int k = idx + offset;
     
-    if (k < N) C[idx] = A[k] + B[k];
-    if (k + blockDim.x < N) {
-        C[idx + blockDim.x] = A[k + blockDim.x] + B[k + blockDim.x];
+    if (idx + 3 * blockDim.x < N) {
+        C[idx] = A[idx] + B[idx];
+        C[idx + blockDim.x] = A[idx + blockDim.x] + B[idx + blockDim.x];
+        C[idx + 2 * blockDim.x] = A[idx + 2 * blockDim.x] + B[idx + 2 * blockDim.x];
+        C[idx + 3 * blockDim.x] = A[idx + 3 * blockDim.x] + B[idx + 3 * blockDim.x];
     }
-    if (k + 2 * blockDim.x < N) {
-        C[idx + 2 * blockDim.x] = A[k + 2 * blockDim.x] + B[k + 2 * blockDim.x];
-    }
-    if (k + 3 * blockDim.x < N) {
-        C[idx + 3 * blockDim.x] = A[k + 3 * blockDim.x] + B[k + 3 * blockDim.x];
-    }
-}
-
-__global__ void sumArraysReadonlyCache(
-    const float * __restrict__ A, 
-    const float * __restrict__ B, 
-    float * __restrict__ C, 
-    const int N, const int offset) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int k = idx + offset;
-    if (k < N) C[idx] = __ldg(&A[k]) + __ldg(&B[k]);
 }
 
 /**********host functions**********/
@@ -208,9 +175,9 @@ void initialData(float *ip, const int N) {
     }
 }
 
-void sumArraysOnHost(float *A, float *B, float *C, const int N, const int offset) {
-    for (int i = 0, k = offset; k < N; i++, k++) {
-        C[i] = A[k] + B[k];
+void sumArraysOnHost(float *A, float *B, float *C, const int N) {
+    for (int i = 0; i < N; i++) {
+        C[i] = A[i] + B[i];
     }
 }
 
