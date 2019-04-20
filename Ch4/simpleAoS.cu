@@ -55,7 +55,7 @@ int main(int argc, char **argv) {
     // execute kernel
     int blocksize = 128;
     if (argc > 1) blocksize = atoi(argv[1]);
-    dim3 block(blocksize, 1);
+    dim3 block(blocksize);
     dim3 grid((nElem + block.x - 1) / block.x, 1);
     start = clock();
     incrementInnerStruct<<<grid, block>>>(d_in, d_out, nElem);

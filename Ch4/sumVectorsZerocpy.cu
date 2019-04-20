@@ -101,7 +101,7 @@ int main(int argc, char **argv)
     initialData(h_A, nElem);
     initialData(h_B, nElem);
     memset(h_C, 0, nBytes);
-    memset(h_C_gpu,  0, nBytes);
+    memset(h_C_gpu, 0, nBytes);
 
     // pass the pointer to device
     // no need when using unified virtual addressing (UVA)
