@@ -87,7 +87,7 @@ int main(int argc, char **argv) {
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("read by row, store by column: %f ms\n", time * 1000.0);
+    printf("[Cartesian] read by row, store by column: %f ms\n", time * 1000.0);
     CHECK(cudaMemcpy(h_out_gpu, d_out, nBytes, cudaMemcpyDeviceToHost));
     checkResult(h_out, h_out_gpu, nx, ny);
 
@@ -99,7 +99,7 @@ int main(int argc, char **argv) {
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("read by column, store by row: %f ms\n", time * 1000.0);
+    printf("[Cartesian] read by column, store by row: %f ms\n", time * 1000.0);
     CHECK(cudaMemcpy(h_out_gpu, d_out, nBytes, cudaMemcpyDeviceToHost));
     checkResult(h_out, h_out_gpu, nx, ny);
 
@@ -111,7 +111,7 @@ int main(int argc, char **argv) {
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("read by column, store by row: %f ms\n", time * 1000.0);
+    printf("[diagonal]  read by row, store by column: %f ms\n", time * 1000.0);
     CHECK(cudaMemcpy(h_out_gpu, d_out, nBytes, cudaMemcpyDeviceToHost));
     checkResult(h_out, h_out_gpu, nx, ny);
 
@@ -123,7 +123,7 @@ int main(int argc, char **argv) {
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("read by column, store by row: %f ms\n", time * 1000.0);
+    printf("[diagonal]  read by column, store by row: %f ms\n", time * 1000.0);
     CHECK(cudaMemcpy(h_out_gpu, d_out, nBytes, cudaMemcpyDeviceToHost));
     checkResult(h_out, h_out_gpu, nx, ny);
 
