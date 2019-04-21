@@ -49,7 +49,7 @@ int main(int argc, char **argv) {
     double cpuTime = ((double) (end - start)) / CLOCKS_PER_SEC;
 
     // configration
-    int dimx = 32, dimy = 32;
+    int dimx = 16, dimy = 16;
     dim3 block(dimx, dimy);
     dim3 grid((nx + block.x - 1) / block.x, (ny + block.y - 1) / block.y);
     printf("Grid dimension (%d, %d) Block dimensiton (%d, %d)\n",grid.x, grid.y, block.x, block.y);
