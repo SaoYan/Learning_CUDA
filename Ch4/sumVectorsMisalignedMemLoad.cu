@@ -5,7 +5,6 @@ void initialData(float *ip, const int N);
 void sumArraysOnHost(float *A, float *B, float *C, const int N, const int offset);
 void verifyResult(float *hostRes, float *deviceRes, const int N);
 
-__global__ void warmup(float *A, float *B, float *C, const int N, const int offset);
 __global__ void sumArraysOnDeviceOffset(float *A, float *B, float *C, const int N, const int offset);
 __global__ void sumArraysOnDeviceOffsetUnroll2(float *A, float *B, float *C, const int N, const int offset);
 __global__ void sumArraysOnDeviceOffsetUnroll4(float *A, float *B, float *C, const int N, const int offset);
@@ -75,21 +74,29 @@ int main(int argc, char **argv) {
     dim3 block(blockSize);
     dim3 grid((nElem+block.x-1)/block.x);
 
-    // 0. warm up
-    warmup<<<grid, block>>>(d_A, d_B, d_C, nElem, offset);
-    CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
-    CHECK(cudaGetLastError());
-
     // 1. no unrolling
     cudaMemset(d_C, 0, nBytes);
     memset(h_C_gpu, 0, nBytes);
     start = clock();
     sumArraysOnDeviceOffset<<<grid, block>>>(d_A, d_B, d_C, nElem, offset);
-    // sumArraysReadonlyCache<<<grid, block>>>(d_A, d_B, d_C, nElem, offset);
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("no unrolling <<< %4d, %4d >>> offset %d elapsed %f ms\n",
+    printf("no unrolling    <<< %4d, %4d >>> offset %d elapsed %f ms\n",
+        grid.x, block.x, offset, time * 1000);
+    // check result
+    CHECK(cudaMemcpy(h_C_gpu, d_C, nBytes, cudaMemcpyDeviceToHost));
+    verifyResult(h_C, h_C_gpu, nElem);
+
+    // 1. no unrolling; read-only cache
+    cudaMemset(d_C, 0, nBytes);
+    memset(h_C_gpu, 0, nBytes);
+    start = clock();
+    sumArraysReadonlyCache<<<grid, block>>>(d_A, d_B, d_C, nElem, offset);
+    CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
+    end = clock();
+    time = ((double) (end - start)) / CLOCKS_PER_SEC;
+    printf("read-only cache <<< %4d, %4d >>> offset %d elapsed %f ms\n",
         grid.x, block.x, offset, time * 1000);
     // check result
     CHECK(cudaMemcpy(h_C_gpu, d_C, nBytes, cudaMemcpyDeviceToHost));
@@ -103,9 +110,8 @@ int main(int argc, char **argv) {
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("unroll2      <<< %4d, %4d >>> offset %d elapsed %f ms\n",
+    printf("unroll2         <<< %4d, %4d >>> offset %d elapsed %f ms\n",
         grid.x / 2, block.x, offset, time * 1000);
-    
     // check result
     CHECK(cudaMemcpy(h_C_gpu, d_C, nBytes, cudaMemcpyDeviceToHost));
     verifyResult(h_C, h_C_gpu, nElem);
@@ -118,7 +124,7 @@ int main(int argc, char **argv) {
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("unroll4      <<< %4d, %4d >>> offset %d elapsed %f ms\n",
+    printf("unroll4         <<< %4d, %4d >>> offset %d elapsed %f ms\n",
         grid.x / 4, block.x, offset, time * 1000);
     // check result
     CHECK(cudaMemcpy(h_C_gpu, d_C, nBytes, cudaMemcpyDeviceToHost));
@@ -141,12 +147,6 @@ int main(int argc, char **argv) {
 }
 
 /**********CUDA kernels**********/
-
-__global__ void warmup(float *A, float *B, float *C, const int N, const int offset) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int k = idx + offset;
-    if (k < N) C[idx] = A[k] + B[k];
-}
 
 __global__ void sumArraysOnDeviceOffset(
     float *A, float *B, float *C, 
