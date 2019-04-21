@@ -1,7 +1,8 @@
 #include <stdio.h>
 #include <cuda_runtime.h>
 
-__global__ void checkGlobalVariable();
+void printValue(float *ip, const int n);
+__global__ void modifyGlobalVariable(const int n);
 
 #define CHECK(call) {                                                        \
     const cudaError_t error = call;                                          \
@@ -12,27 +13,41 @@ __global__ void checkGlobalVariable();
     }                                                                        \
 }                                                                            \
 
-__device__ float devData;
+#define N 32
+
+__device__ float devData[N];
 
 int main(int argc, char **argv) {
     // initialize the global variable
-    float value = 3.14f;
-    CHECK(cudaMemcpyToSymbol(devData, &value, sizeof(float)));
-    printf("Host:   copied %f to the global variable\n", value);
+    float *value = (float *)malloc(N * sizeof(float));
+    for (int i = 0; i < N; i++) {
+        value[i] = 3.14f;
+    }
+    printValue(value, N);
+    CHECK(cudaMemcpyToSymbol(devData, value, N * sizeof(float)));
 
     // invoke kernel
-    checkGlobalVariable<<<1, 64>>>();
+    modifyGlobalVariable<<<1, N>>>(N);
+    CHECK(cudaDeviceSynchronize());
     
     // copy back to host
-    CHECK(cudaMemcpyFromSymbol(&value, devData, sizeof(float)));
-    printf("Host:   the value changed by the kernel to %f\n", value);
+    CHECK(cudaMemcpyFromSymbol(value, devData, N * sizeof(float)));
+    printValue(value, N);
 
     cudaDeviceReset();
     return 0;
 }
 
-__global__ void checkGlobalVariable() {
-    printf("Device: the value of the global variable is %f\n", devData);
-    devData += 2.0f;
-    __syncthreads();
+__global__ void modifyGlobalVariable(const int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        devData[idx] *= idx;
+    }
 } 
+
+void printValue(float *ip, const int n) {
+    for (int i = 0; i < n; i ++) {
+        printf("%.2f, ", ip[i]);
+    }
+    printf("%c", '\n');
+}
