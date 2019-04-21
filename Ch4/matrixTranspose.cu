@@ -10,27 +10,46 @@
     }                                                                        \
 }                                                                            \
 
-__global__ void warmup(float *out, float *in, int nx, int ny);
-__global__ void transposeRowCol(float *out, float *in, int nx, int ny);
-__global__ void transposeColRow(float *out, float *in, int nx, int ny);
-
-void transposeHostRowCol(float *out, float *in, const int nx, const int ny);
-void transposeHostColRow(float *out, float *in, const int nx, const int ny);
 void initialMatrix(float *ip, int nx, int ny);
 void checkResult(float *hostRef, float *gpuRef, const int nx, const int ny);
 
-int main(int argc, char **argv) {
-    int nx = 1<<11, ny = 1<<11;
-    size_t nBytes = nx * ny * sizeof(float);
-    clock_t start, end;
-    double time;
+void transposeHostRowCol(float *out, float *in, const int nx, const int ny);
+void transposeHostColRow(float *out, float *in, const int nx, const int ny);
 
+__global__ void warmup(float *out, float *in, int nx, int ny);
+
+__global__ void transposeRowCol(float *out, float *in, int nx, int ny);
+__global__ void transposeColRow(float *out, float *in, int nx, int ny);
+
+__global__ void transposeDiagonalRowCol(float *out, float *in, const int nx, const int ny);
+__global__ void transposeDiagonalColRow(float *out, float *in, const int nx, const int ny);
+
+// __global__ void transposeRowColUnroll4(float *out, float *in, const int nx, const int ny);
+// __global__ void transposeColRowUnroll4(float *out, float *in, const int nx, const int ny);
+
+int main(int argc, char **argv) {
     // set up device
     int dev = 0;
     cudaDeviceProp deviceProp; 
     CHECK(cudaGetDeviceProperties(&deviceProp, dev)); 
     printf("Using Device %d: %s\n", dev, deviceProp.name); 
     CHECK(cudaSetDevice(dev));
+
+    // configuration
+    int blockx = 16, blocky = 16;
+    int nx = 1<<11, ny = 1<<11;
+    if (argc > 1) blockx = atoi(argv[1]);
+    if (argc > 2) blocky = atoi(argv[2]);
+    if (argc > 3) nx = atoi(argv[3]);
+    if (argc > 4) ny = atoi(argv[4]);
+    dim3 block(blockx, blocky);
+    dim3 grid((nx + block.x - 1) / block.x, (ny + block.y - 1) / block.y);
+    printf("Matrix size (%d, %d)\n", nx, ny);
+    printf("Kernel execution config <<<(%d, %d), (%d, %d)>>>\n", grid.x, grid.y, block.x, block.y);
+
+    size_t nBytes = nx * ny * sizeof(float);
+    clock_t start, end;
+    double time;
 
     // allocate host memory
     float *h_in      = (float *)malloc(nBytes);
@@ -39,8 +58,12 @@ int main(int argc, char **argv) {
     initialMatrix(h_in, nx, ny);
 
     // compute on CPU
+    start = clock();
     transposeHostRowCol(h_in, h_out, nx, ny);
     // transposeHostColRow(h_in, h_out, nx, ny);
+    end = clock();
+    time = ((double) (end - start)) / CLOCKS_PER_SEC;
+    printf("transpose on CPU:             %f ms\n", time * 1000.0);
 
     // allocate device memory
     float *d_in, *d_out;
@@ -50,21 +73,13 @@ int main(int argc, char **argv) {
     // copy data from host to device
     CHECK(cudaMemcpy(d_in, h_in, nBytes, cudaMemcpyHostToDevice));
 
-    // configuration
-    int blockx = 16, blocky = 16;
-    if (argc > 1) blockx = atoi(argv[1]);
-    if (argc > 2) blocky = atoi(argv[2]);
-    dim3 block(blockx, blocky);
-    dim3 grid((nx + block.x - 1) / block.x, (ny + block.y - 1) / block.y);
-    printf("<<< (%3d, %3d), (%3d, %3d) >>>\n", grid.x, grid.y, block.x, block.y);
-
-    // execute kernel - warm up
+    // 0. execute kernel - warm up
     memset(h_out_gpu, 0.0, nBytes);
     CHECK(cudaMemset(d_out, 0.0, nBytes));
     warmup<<<grid, block>>>(d_in, d_out, nx, ny);
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
 
-    // execute kernel - read by row, store by col
+    // 1. execute kernel - read by row, store by col
     memset(h_out_gpu, 0.0, nBytes);
     CHECK(cudaMemset(d_out, 0.0, nBytes));
     start = clock();
@@ -76,11 +91,35 @@ int main(int argc, char **argv) {
     CHECK(cudaMemcpy(h_out_gpu, d_out, nBytes, cudaMemcpyDeviceToHost));
     checkResult(h_out, h_out_gpu, nx, ny);
 
-    // execute kernel - read by col, store by row
+    // 2. execute kernel - read by col, store by row
     memset(h_out_gpu, 0.0, nBytes);
     CHECK(cudaMemset(d_out, 0.0, nBytes));
     start = clock();
     transposeColRow<<<grid, block>>>(d_in, d_out, nx, ny);
+    CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
+    end = clock();
+    time = ((double) (end - start)) / CLOCKS_PER_SEC;
+    printf("read by column, store by row: %f ms\n", time * 1000.0);
+    CHECK(cudaMemcpy(h_out_gpu, d_out, nBytes, cudaMemcpyDeviceToHost));
+    checkResult(h_out, h_out_gpu, nx, ny);
+
+    // 3. execute kernel - read by col, store by row
+    memset(h_out_gpu, 0.0, nBytes);
+    CHECK(cudaMemset(d_out, 0.0, nBytes));
+    start = clock();
+    transposeDiagonalRowCol<<<grid, block>>>(d_in, d_out, nx, ny);
+    CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
+    end = clock();
+    time = ((double) (end - start)) / CLOCKS_PER_SEC;
+    printf("read by column, store by row: %f ms\n", time * 1000.0);
+    CHECK(cudaMemcpy(h_out_gpu, d_out, nBytes, cudaMemcpyDeviceToHost));
+    checkResult(h_out, h_out_gpu, nx, ny);
+
+    // 4. execute kernel - read by col, store by row
+    memset(h_out_gpu, 0.0, nBytes);
+    CHECK(cudaMemset(d_out, 0.0, nBytes));
+    start = clock();
+    transposeDiagonalColRow<<<grid, block>>>(d_in, d_out, nx, ny);
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
@@ -126,6 +165,60 @@ __global__ void transposeColRow(float *out, float *in, int nx, int ny) {
         out[iy * nx + ix] = in[ix * ny + iy];
     }
 }
+
+__global__ void transposeDiagonalRowCol(float *out, float *in, const int nx, const int ny) {
+    int blk_x = (blockIdx.x + blockIdx.y) % gridDim.x;
+    int blk_y = blockIdx.x;
+
+    int ix = blockDim.x * blk_x + threadIdx.x;
+    int iy = blockDim.y * blk_y + threadIdx.y;
+
+    if (ix < nx && iy < ny) {
+        out[ix * ny + iy] = in[iy * nx + ix];
+    }
+}
+
+__global__ void transposeDiagonalColRow(float *out, float *in, const int nx, const int ny) {
+    int blk_x = (blockIdx.x + blockIdx.y) % gridDim.x;
+    int blk_y = blockIdx.x;
+
+    int ix = blockDim.x * blk_x + threadIdx.x;
+    int iy = blockDim.y * blk_y + threadIdx.y;
+
+    if (ix < nx && iy < ny) {
+        out[iy * nx + ix] = in[ix * ny + iy];
+    }
+}
+
+// __global__ void transposeRowColUnroll4(float *out, float *in, const int nx, const int ny) {
+//     int ix = blockDim.x * blockIdx.x * 4 + threadIdx.x;
+//     int iy = blockDim.y * blockIdx.y + threadIdx.y;
+
+//     int ti = iy * nx + ix; // access in rows
+//     int to = ix * ny + iy; // access in columns
+
+//     if (ix + 3 * blockDim.x < nx && iy < ny) {
+//         out[to]                       = in[ti];
+//         out[to + ny * blockDim.x]     = in[ti + blockDim.x];
+//         out[to + ny * 2 * blockDim.x] = in[ti + 2 * blockDim.x];
+//         out[to + ny * 3 * blockDim.x] = in[ti + 3 * blockDim.x];
+//     }
+// }
+
+// __global__ void transposeColRowUnroll4(float *out, float *in, const int nx, const int ny) {
+//     int ix = blockDim.x * blockIdx.x * 4 + threadIdx.x;
+//     int iy = blockDim.y * blockIdx.y + threadIdx.y;
+
+//     int ti = iy * nx + ix; // access in rows
+//     int to = ix * ny + iy; // access in columns
+
+//     if (ix + 3 * blockDim.x < nx && iy < ny) {
+//         out[ti]                  = in[to];
+//         out[ti +   blockDim.x]   = in[to +   blockDim.x * ny];
+//         out[ti + 2 * blockDim.x] = in[to + 2 * blockDim.x * ny];
+//         out[ti + 3 * blockDim.x] = in[to + 3 * blockDim.x * ny];
+//     }
+// }
 
 /**********host functions**********/
 
