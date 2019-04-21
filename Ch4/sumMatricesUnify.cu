@@ -5,7 +5,6 @@ void initialData(float *ip, const int nx, const int ny);
 void sumArraysOnHost(float *A, float *B, float *C, const int nx, const int ny);
 void verifyResult(float *hostRes, float *deviceRes, const int nx, const int ny);
 
-__global__ void warmup(float *A, float *B, float *C, const int nx, const int ny);
 __global__ void sumArraysOnDevice(float *A, float *B, float *C, const int nx, const int ny);
 
 #define CHECK(call) {                                                        \
@@ -55,9 +54,6 @@ int main(int argc, char **argv) {
     dim3 grid((nx + block.x - 1) / block.x, (ny + block.y - 1) / block.y);
     printf("Grid dimension (%d, %d) Block dimensiton (%d, %d)\n",grid.x, grid.y, block.x, block.y);
 
-    // warmup
-    warmup<<<grid, block>>>(A, B, C_gpu, nx, ny);
-
     // launch CUDA kernel
     memset(C_gpu, 0, nBytes);
     start = clock();
@@ -84,17 +80,6 @@ int main(int argc, char **argv) {
 }
 
 /**********CUDA kernels**********/
-
-__global__ void warmup(float *A, float *B, float *C, const int nx, const int ny) {
-    // Thread and block index --> Coordinate in the matrix
-    int ix = threadIdx.x + blockIdx.x * blockDim.x;
-    int iy = threadIdx.y + blockIdx.y * blockDim.y;
-    // Coordinate in the matrix --> Offset in linear global memory  
-    if (ix < nx && iy < ny)  {
-        int idx = iy * nx + ix;
-        C[idx] = A[idx] + B[idx];
-    }
-}
 
 __global__ void sumArraysOnDevice(float *A, float *B, float *C, const int nx, const int ny) {
     // Thread and block index --> Coordinate in the matrix
