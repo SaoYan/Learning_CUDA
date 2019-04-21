@@ -5,6 +5,7 @@ void initialData(float *ip, const int nx, const int ny);
 void sumArraysOnHost(float *A, float *B, float *C, const int nx, const int ny);
 void verifyResult(float *hostRes, float *deviceRes, const int nx, const int ny);
 
+__global__ void warmup(float *A, float *B, float *C, const int nx, const int ny);
 __global__ void sumArraysOnDevice(float *A, float *B, float *C, const int nx, const int ny);
 
 #define CHECK(call) {                                                        \
@@ -29,76 +30,71 @@ int main(int argc, char **argv) {
     printf("Using Device %d: %s\n", dev, deviceProp.name); 
     CHECK(cudaSetDevice(dev));
 
-    // allocate host memory
-    float *h_A, *h_B, *h_C, *h_C_gpu;
-    h_A = (float *) malloc(nBytes);
-    h_B = (float *) malloc(nBytes);
-    h_C = (float *) malloc(nBytes);
-    h_C_gpu = (float *) malloc(nBytes);
+    // allocate unified memory
+    float *A, *B, *C, *C_gpu;
+    CHECK(cudaMallocManaged((float**)&A, nBytes));
+    CHECK(cudaMallocManaged((float**)&B, nBytes));
+    CHECK(cudaMallocManaged((float**)&C, nBytes));
+    CHECK(cudaMallocManaged((float**)&C_gpu, nBytes));
 
-    // initial data (in CPU mem)
-    initialData(h_A, nx, ny);
-    initialData(h_B, nx, ny);
-    memset(h_C, 0, nBytes);
-    memset(h_C_gpu, 0, nBytes);
+    // initialize data
+    initialData(A, nx, ny);
+    initialData(B, nx, ny);
+    memset(C, 0, nBytes);
+    memset(C_gpu, 0, nBytes);
 
     // compute on CPU
     start = clock();
-    sumArraysOnHost(h_A, h_B, h_C, nx, ny);
+    sumArraysOnHost(A, B, C, nx, ny);
     end = clock();
     double cpuTime = ((double) (end - start)) / CLOCKS_PER_SEC;
 
-    // allocate device mem
-    float *d_A, *d_B, *d_C;
-    CHECK(cudaMalloc((float**)&d_A, nBytes));
-    CHECK(cudaMalloc((float**)&d_B, nBytes));
-    CHECK(cudaMalloc((float**)&d_C, nBytes));
-
-    // copy data from CPU to GPU
-    start = clock();
-    CHECK(cudaMemcpy(d_A, h_A, nBytes, cudaMemcpyHostToDevice));
-    CHECK(cudaMemcpy(d_B, h_B, nBytes, cudaMemcpyHostToDevice));
-    end = clock();
-    double copyTime = ((double) (end - start)) / CLOCKS_PER_SEC;
-
-    // launch CUDA kernel
-    int dimx = 16, dimy = 16;
+    // configration
+    int dimx = 32, dimy = 32;
     dim3 block(dimx, dimy);
     dim3 grid((nx + block.x - 1) / block.x, (ny + block.y - 1) / block.y);
     printf("Grid dimension (%d, %d) Block dimensiton (%d, %d)\n",grid.x, grid.y, block.x, block.y);
+
+    // warmup
+    warmup<<<grid, block>>>(A, B, C_gpu, nx, ny);
+
+    // launch CUDA kernel
+    memset(C_gpu, 0, nBytes);
     start = clock();
-    sumArraysOnDevice<<<grid, block>>>(d_A, d_B, d_C, nx, ny);
-    CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
+    sumArraysOnDevice<<<grid, block>>>(A, B, C_gpu, nx, ny);
+    CHECK(cudaDeviceSynchronize()); // synchronization is necessary when using unified memory!
     end = clock();
     double gpuTime = ((double) (end - start)) / CLOCKS_PER_SEC;
-    
-    // copy data from GPU back to CPU
-    CHECK(cudaMemcpy(h_C_gpu, d_C, nBytes, cudaMemcpyDeviceToHost));
 
     // verify
-    verifyResult(h_C, h_C_gpu, nx, ny);
+    verifyResult(C, C_gpu, nx, ny);
+    CHECK(cudaGetLastError());
     printf("It takes %.4f sec to execute on CPU\n", cpuTime);
-    printf("It takes %.4f sec to copy data from CPU to GPU\n", copyTime);
     printf("It takes %.4f sec to execute on GPU\n", gpuTime);
 
-    // free host mem
-    free(h_A);
-    free(h_B);
-    free(h_C);
-    free(h_C_gpu);
-
-    // free device mem
-    CHECK(cudaFree(d_A));
-    CHECK(cudaFree(d_B));
-    CHECK(cudaFree(d_C));
+    // free memory
+    CHECK(cudaFree(A));
+    CHECK(cudaFree(B));
+    CHECK(cudaFree(C));
+    CHECK(cudaFree(C_gpu));
     
     // clean up all resources
     CHECK(cudaDeviceReset());
-
     return 0;
 }
 
 /**********CUDA kernels**********/
+
+__global__ void warmup(float *A, float *B, float *C, const int nx, const int ny) {
+    // Thread and block index --> Coordinate in the matrix
+    int ix = threadIdx.x + blockIdx.x * blockDim.x;
+    int iy = threadIdx.y + blockIdx.y * blockDim.y;
+    // Coordinate in the matrix --> Offset in linear global memory  
+    if (ix < nx && iy < ny)  {
+        int idx = iy * nx + ix;
+        C[idx] = A[idx] + B[idx];
+    }
+}
 
 __global__ void sumArraysOnDevice(float *A, float *B, float *C, const int nx, const int ny) {
     // Thread and block index --> Coordinate in the matrix

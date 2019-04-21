@@ -17,8 +17,11 @@ __global__ void sumArraysOnDevice(float *A, float *B, float *C, const int N);
 }                                                                            \
 
 int main(int argc, char **argv) {
-    int nElem = 1<<28;
+    int ipower = 28;
+    if (argc > 1) ipower = atoi(argv[1]);
+    int nElem = 1<<ipower;
     size_t nBytes = nElem * sizeof(float);
+    clock_t start, end;
     printf("Vector size %d\n", nElem);
 
     // set up device
@@ -39,19 +42,30 @@ int main(int argc, char **argv) {
     initialData(A, nElem);
     initialData(B, nElem);
     memset(C, 0, nBytes);
-    memset(C_gpu,  0, nBytes);
+    memset(C_gpu, 0, nBytes);
 
     // compute on CPU
+    start = clock();
     sumArraysOnHost(A, B, C, nElem);
+    end = clock();
+    double cpuTime = ((double) (end - start)) / CLOCKS_PER_SEC;
 
     // launch CUDA kernel
     int threadPerBlock = 1024;
+    if (argc > 2) ipower = atoi(argv[2]);
     dim3 block (threadPerBlock);
     dim3 grid((nElem + block.x - 1) / block.x);
+    printf("Grid dimension %d Block dimensiton %d\n",grid.x, block.x);
+    start = clock();
     sumArraysOnDevice<<<grid, block>>>(A, B, C_gpu, nElem);
+    CHECK(cudaDeviceSynchronize()); // synchronization is necessary when using unified memory!
+    end = clock();
+    double gpuTime = ((double) (end - start)) / CLOCKS_PER_SEC;
 
     // check results
     verifyResult(C, C_gpu, nElem);
+    printf("It takes %.4f sec to execute on CPU\n", cpuTime);
+    printf("It takes %.4f sec to execute on GPU\n", gpuTime);
 
     // free memory
     CHECK(cudaFree(A));
