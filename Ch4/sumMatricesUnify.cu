@@ -48,6 +48,13 @@ int main(int argc, char **argv) {
     end = clock();
     double cpuTime = ((double) (end - start)) / CLOCKS_PER_SEC;
 
+    // prefetching
+    int device = -1;
+    CHECK(cudaGetDevice(&device));
+    CHECK(cudaMemPrefetchAsync(A, nBytes, device, NULL));
+    CHECK(cudaMemPrefetchAsync(B, nBytes, device, NULL));
+    CHECK(cudaMemPrefetchAsync(C_gpu, nBytes, device, NULL));
+
     // configration
     int dimx = 16, dimy = 16;
     dim3 block(dimx, dimy);
@@ -55,7 +62,6 @@ int main(int argc, char **argv) {
     printf("Grid dimension (%d, %d) Block dimensiton (%d, %d)\n",grid.x, grid.y, block.x, block.y);
 
     // launch CUDA kernel
-    memset(C_gpu, 0, nBytes);
     start = clock();
     sumArraysOnDevice<<<grid, block>>>(A, B, C_gpu, nx, ny);
     CHECK(cudaDeviceSynchronize()); // synchronization is necessary when using unified memory!

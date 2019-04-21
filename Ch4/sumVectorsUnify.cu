@@ -50,6 +50,13 @@ int main(int argc, char **argv) {
     end = clock();
     double cpuTime = ((double) (end - start)) / CLOCKS_PER_SEC;
 
+    // prefetching
+    int device = -1;
+    CHECK(cudaGetDevice(&device));
+    CHECK(cudaMemPrefetchAsync(A, nBytes, device, NULL));
+    CHECK(cudaMemPrefetchAsync(B, nBytes, device, NULL));
+    CHECK(cudaMemPrefetchAsync(C_gpu, nBytes, device, NULL));
+
     // launch CUDA kernel
     int threadPerBlock = 1024;
     if (argc > 2) ipower = atoi(argv[2]);
