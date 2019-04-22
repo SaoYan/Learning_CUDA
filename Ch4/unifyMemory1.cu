@@ -2,8 +2,18 @@
 #include <stdio.h>
 #include <cuda_runtime.h>
 
+#define CHECK(call) {                                                        \
+    const cudaError_t error = call;                                          \
+    if (error != cudaSuccess) {                                              \
+        printf("Error: %s:%d, ", __FILE__, __LINE__);                        \
+        printf("code: %d, reason: %s\n", error, cudaGetErrorString(error));  \
+        exit(1);                                                             \
+    }                                                                        \
+}                                                                            \
+
 // reference:
 // https://devblogs.nvidia.com/unified-memory-in-cuda-6/
+
 
 /**********class definition**********/
 
@@ -13,14 +23,14 @@ class Managed {
 public:
     void *operator new(size_t len) {
         void *ptr;
-        cudaMallocManaged(&ptr, len);
-        cudaDeviceSynchronize();
+        CHECK(cudaMallocManaged(&ptr, len));
+        CHECK(cudaDeviceSynchronize());
         return ptr;
     }
 
     void operator delete(void *ptr) {
-        cudaDeviceSynchronize();
-        cudaFree(ptr);
+        CHECK(cudaDeviceSynchronize());
+        CHECK(cudaFree(ptr));
     }
 };
 
@@ -66,7 +76,7 @@ private:
     void _realloc(int len) {
         cudaFree(data);
         length = len;
-        cudaMallocManaged(&data, length+1);
+        CHECK(cudaMallocManaged(&data, length+1));
     }
 };
 
@@ -105,17 +115,18 @@ int main(int argc, char **argv) {
     e->name = "hello";
     
     Kernel_by_pointer<<< 1, 1 >>>(e);
-    cudaDeviceSynchronize();
+    CHECK(cudaDeviceSynchronize());
     printf("On host (after by-pointer): name=%s, value=%d\n\n", e->name.c_str(), e->value);
 
     Kernel_by_ref<<< 1, 1 >>>(*e);
-    cudaDeviceSynchronize();
+    CHECK(cudaDeviceSynchronize());
     printf("On host (after by-ref):     name=%s, value=%d\n\n", e->name.c_str(), e->value);
 
     Kernel_by_value<<< 1, 1 >>>(*e);
-    cudaDeviceSynchronize();
+    CHECK(cudaDeviceSynchronize());
     printf("On host (after by-value):   name=%s, value=%d\n\n", e->name.c_str(), e->value);
 
     delete e;
-    cudaDeviceReset();
+    CHECK(cudaDeviceReset());
+    return 0;
 }
