@@ -12,7 +12,7 @@
 
 #define LEN 1<<22
 
-typedef struct innerStruct {
+typedef struct __align__(8) innerStruct {
     float x;
     float y;
 } innerStruct;
