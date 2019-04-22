@@ -24,9 +24,6 @@ __global__ void transposeColRow(float *out, float *in, int nx, int ny);
 __global__ void transposeDiagonalRowCol(float *out, float *in, const int nx, const int ny);
 __global__ void transposeDiagonalColRow(float *out, float *in, const int nx, const int ny);
 
-// __global__ void transposeRowColUnroll4(float *out, float *in, const int nx, const int ny);
-// __global__ void transposeColRowUnroll4(float *out, float *in, const int nx, const int ny);
-
 int main(int argc, char **argv) {
     // set up device
     int dev = 0;
@@ -189,36 +186,6 @@ __global__ void transposeDiagonalColRow(float *out, float *in, const int nx, con
         out[iy * nx + ix] = in[ix * ny + iy];
     }
 }
-
-// __global__ void transposeRowColUnroll4(float *out, float *in, const int nx, const int ny) {
-//     int ix = blockDim.x * blockIdx.x * 4 + threadIdx.x;
-//     int iy = blockDim.y * blockIdx.y + threadIdx.y;
-
-//     int ti = iy * nx + ix; // access in rows
-//     int to = ix * ny + iy; // access in columns
-
-//     if (ix + 3 * blockDim.x < nx && iy < ny) {
-//         out[to]                       = in[ti];
-//         out[to + ny * blockDim.x]     = in[ti + blockDim.x];
-//         out[to + ny * 2 * blockDim.x] = in[ti + 2 * blockDim.x];
-//         out[to + ny * 3 * blockDim.x] = in[ti + 3 * blockDim.x];
-//     }
-// }
-
-// __global__ void transposeColRowUnroll4(float *out, float *in, const int nx, const int ny) {
-//     int ix = blockDim.x * blockIdx.x * 4 + threadIdx.x;
-//     int iy = blockDim.y * blockIdx.y + threadIdx.y;
-
-//     int ti = iy * nx + ix; // access in rows
-//     int to = ix * ny + iy; // access in columns
-
-//     if (ix + 3 * blockDim.x < nx && iy < ny) {
-//         out[ti]                  = in[to];
-//         out[ti +   blockDim.x]   = in[to +   blockDim.x * ny];
-//         out[ti + 2 * blockDim.x] = in[to + 2 * blockDim.x * ny];
-//         out[ti + 3 * blockDim.x] = in[to + 3 * blockDim.x * ny];
-//     }
-// }
 
 /**********host functions**********/
 
