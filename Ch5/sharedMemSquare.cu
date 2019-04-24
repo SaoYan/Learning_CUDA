@@ -160,14 +160,14 @@ __global__ void writeRowReadCol(int *out) {
     int idx = threadIdx.y * blockDim.x + threadIdx.x;
 
     // shared memory store operation
-    tile[threadIdx.x][threadIdx.y] = idx;
+    tile[threadIdx.y][threadIdx.x] = idx;
 
     // wait for all threads to complete
     __syncthreads();
 
     // shared memory load operation
     // global memory store operation
-    out[idx] = tile[threadIdx.y][threadIdx.x];
+    out[idx] = tile[threadIdx.x][threadIdx.y];
 }
 
 __global__ void writeColReadRow(int *out) {
@@ -179,14 +179,14 @@ __global__ void writeColReadRow(int *out) {
     int idx = threadIdx.y * blockDim.x + threadIdx.x;
 
     // shared memory store operation
-    tile[threadIdx.y][threadIdx.x] = idx;
+    tile[threadIdx.x][threadIdx.y] = idx;
 
     // wait for all threads to complete
     __syncthreads();
 
     // shared memory load operation
     // global memory store operation
-    out[idx] = tile[threadIdx.x][threadIdx.y];
+    out[idx] = tile[threadIdx.y][threadIdx.x];
 }
 
 __global__ void writeRowReadRowDynamic(int *out) {
@@ -215,9 +215,9 @@ __global__ void writeColReadColDynamic(int *out) {
     // mapping from thread index to global memory index
     // assuming only one block
     int idx = threadIdx.y * blockDim.x + threadIdx.x;
-    int colIdx = threadIdx.x * blockDim.y + threadIdx.y; // col-based index
 
-    // shared memory store operation
+    // shared memory store 
+    int colIdx = threadIdx.x * blockDim.y + threadIdx.y; // col-based index
     tile[colIdx] = idx;
 
     // wait for all threads to complete
@@ -254,9 +254,9 @@ __global__ void writeColReadColDynamicPad(int *out) {
     // mapping from thread index to global memory index
     // assuming only one block
     int idx = threadIdx.y * blockDim.x + threadIdx.x;
-    int colIdx = threadIdx.x * (blockDim.y + PADDING) + threadIdx.y; // col-based index
 
     // shared memory store operation
+    int colIdx = threadIdx.x * (blockDim.y + PADDING) + threadIdx.y; // col-based index
     tile[colIdx] = idx;
 
     // wait for all threads to complete
