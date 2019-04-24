@@ -107,12 +107,12 @@ int main(int argc, char **argv) {
     if (ifprint) printData("write col read col; padding:\n", h_out, BDIMX * BDIMY);
     CHECK(cudaGetLastError());
 
-    // CHECK(cudaMemset(d_out, 0, nBytes));
-    // memset(h_out, 0, nBytes);
-    // writeColReadColDynamicPad<<<grid, block, nBytes + PADDING*BDIMY*sizeof(int)>>>(d_out);
-    // CHECK(cudaMemcpy(h_out, d_out, nBytes, cudaMemcpyDeviceToHost));
-    // if (ifprint) printData("write col read col; dynamic + padding:\n", h_out, BDIMX * BDIMY);
-    // CHECK(cudaGetLastError());
+    CHECK(cudaMemset(d_out, 0, nBytes));
+    memset(h_out, 0, nBytes);
+    writeColReadColDynamicPad<<<grid, block, nBytes + PADDING*BDIMY*sizeof(int)>>>(d_out);
+    CHECK(cudaMemcpy(h_out, d_out, nBytes, cudaMemcpyDeviceToHost));
+    if (ifprint) printData("write col read col; dynamic + padding:\n", h_out, BDIMX * BDIMY);
+    CHECK(cudaGetLastError());
 
     CHECK(cudaFree(d_out));
     CHECK(cudaDeviceReset());
@@ -293,7 +293,9 @@ __global__ void writeColReadColDynamicPad(int *out) {
     int idx = threadIdx.y * blockDim.x + threadIdx.x;
 
     // shared memory store operation
-    int colIdx = threadIdx.x * (blockDim.y + PADDING) + threadIdx.y; // col-based index
+    int irow = idx % BDIMY;
+    int icol = idx / BDIMY;
+    int colIdx = irow * (BDIMX + PADDING) + icol; // col-based index
     tile[colIdx] = idx;
 
     // wait for all threads to complete
