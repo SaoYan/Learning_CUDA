@@ -17,13 +17,16 @@
 
 void printData(const char *msg, int *data, const int size);
 
-__global__ void writeRowReadRow (int *out);
-__global__ void writeColReadCol (int *out);
-__global__ void writeRowReadCol (int *out);
-__global__ void writeColReadRow (int *out);
+__global__ void writeRowReadRow(int *out);
+__global__ void writeColReadCol(int *out);
+__global__ void writeRowReadCol(int *out);
+__global__ void writeColReadRow(int *out);
 
-__global__ void writeRowReadRowDynamic (int *out);
-__global__ void writeColReadColDynamic (int *out);
+__global__ void writeRowReadRowDynamic(int *out);
+__global__ void writeColReadColDynamic(int *out);
+
+__global__ void writeColReadColPad(int *out);
+__global__ void writeColReadColDynamicPad(int *out);
 
 int main(int argc, char **argv) {
     // set up device
@@ -80,14 +83,28 @@ int main(int argc, char **argv) {
     memset(h_out, 0, nBytes);
     writeRowReadRowDynamic<<<grid, block, nBytes>>>(d_out);
     CHECK(cudaMemcpy(h_out, d_out, nBytes, cudaMemcpyDeviceToHost));
-    if (ifprint) printData("write row read row dynamic:\n", h_out, BDIMX * BDIMY);
+    if (ifprint) printData("write row read row; dynamic:\n", h_out, BDIMX * BDIMY);
     CHECK(cudaGetLastError());
 
     CHECK(cudaMemset(d_out, 0, nBytes));
     memset(h_out, 0, nBytes);
     writeColReadColDynamic<<<grid, block, nBytes>>>(d_out);
     CHECK(cudaMemcpy(h_out, d_out, nBytes, cudaMemcpyDeviceToHost));
-    if (ifprint) printData("write col read col dynamic:\n", h_out, BDIMX * BDIMY);
+    if (ifprint) printData("write col read col; dynamic:\n", h_out, BDIMX * BDIMY);
+    CHECK(cudaGetLastError());
+
+    CHECK(cudaMemset(d_out, 0, nBytes));
+    memset(h_out, 0, nBytes);
+    writeColReadColPad<<<grid, block, nBytes>>>(d_out);
+    CHECK(cudaMemcpy(h_out, d_out, nBytes, cudaMemcpyDeviceToHost));
+    if (ifprint) printData("write col read col; padding:\n", h_out, BDIMX * BDIMY);
+    CHECK(cudaGetLastError());
+
+    CHECK(cudaMemset(d_out, 0, nBytes));
+    memset(h_out, 0, nBytes);
+    writeColReadColDynamicPad<<<grid, block, nBytes + PADDING*BDIMY*sizeof(int)>>>(d_out);
+    CHECK(cudaMemcpy(h_out, d_out, nBytes, cudaMemcpyDeviceToHost));
+    if (ifprint) printData("write col read col; dynamic + padding:\n", h_out, BDIMX * BDIMY);
     CHECK(cudaGetLastError());
 
     CHECK(cudaFree(d_out));
@@ -97,7 +114,7 @@ int main(int argc, char **argv) {
 
 /**********CUDA kernels**********/
 
-__global__ void writeRowReadRow (int *out) {
+__global__ void writeRowReadRow(int *out) {
     // static shared memory
     __shared__ int tile[BDIMY][BDIMX];
 
@@ -116,7 +133,7 @@ __global__ void writeRowReadRow (int *out) {
     out[idx] = tile[threadIdx.y][threadIdx.x] ;
 }
 
-__global__ void writeColReadCol (int *out) {
+__global__ void writeColReadCol(int *out) {
     // static shared memory
     __shared__ int tile[BDIMY][BDIMX];
 
@@ -135,7 +152,7 @@ __global__ void writeColReadCol (int *out) {
     out[idx] = tile[threadIdx.x][threadIdx.y];
 }
 
-__global__ void writeRowReadCol (int *out) {
+__global__ void writeRowReadCol(int *out) {
     // static shared memory
     __shared__ int tile[BDIMY][BDIMX];
 
@@ -154,7 +171,7 @@ __global__ void writeRowReadCol (int *out) {
     out[idx] = tile[threadIdx.y][threadIdx.x];
 }
 
-__global__ void writeColReadRow (int *out) {
+__global__ void writeColReadRow(int *out) {
     // static shared memory
     __shared__ int tile[BDIMY][BDIMX];
 
@@ -173,7 +190,7 @@ __global__ void writeColReadRow (int *out) {
     out[idx] = tile[threadIdx.x][threadIdx.y];
 }
 
-__global__ void writeRowReadRowDynamic (int *out) {
+__global__ void writeRowReadRowDynamic(int *out) {
     // dynamic shared memory
     extern __shared__ int tile[];
 
@@ -192,7 +209,7 @@ __global__ void writeRowReadRowDynamic (int *out) {
     out[idx] = tile[idx];
 }
 
-__global__ void writeColReadColDynamic (int *out) {
+__global__ void writeColReadColDynamic(int *out) {
     // dynamic shared memory
     extern __shared__ int tile[];
 
@@ -200,6 +217,45 @@ __global__ void writeColReadColDynamic (int *out) {
     // assuming only one block
     int idx = threadIdx.y * blockDim.x + threadIdx.x;
     int colIdx = threadIdx.x * blockDim.y + threadIdx.y; // col-based index
+
+    // shared memory store operation
+    tile[colIdx] = idx;
+
+    // wait for all threads to complete
+    __syncthreads();
+
+    // shared memory load operation
+    // global memory store operation
+    out[idx] = tile[colIdx];
+}
+
+__global__ void writeColReadColPad(int *out) {
+    // static shared memory with memory padding
+    __shared__ int tile[BDIMY][BDIMX + PADDING];
+
+    // mapping from thread index to global memory index
+    // assuming only one block
+    int idx = threadIdx.y * blockDim.x + threadIdx.x;
+
+    // shared memory store operation
+    tile[threadIdx.x][threadIdx.y] = idx;
+
+    // wait for all threads to complete
+    __syncthreads();
+
+    // shared memory load operation
+    // global memory store operation
+    out[idx] = tile[threadIdx.x][threadIdx.y];
+}
+
+__global__ void writeColReadColDynamicPad(int *out) {
+    // dynamic shared memory
+    extern __shared__ int tile[];
+
+    // mapping from thread index to global memory index
+    // assuming only one block
+    int idx = threadIdx.y * blockDim.x + threadIdx.x;
+    int colIdx = threadIdx.x * (blockDim.y + PADDING) + threadIdx.y; // col-based index
 
     // shared memory store operation
     tile[colIdx] = idx;
