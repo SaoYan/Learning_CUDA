@@ -18,10 +18,13 @@ int neighboredPairReduce(int *data, const int size);
 int interleavedPairReduce(int *data, const int size);
 
 __global__ void warmup(int *g_idata, int * g_odata, const int n);
+
 __global__ void reduceGlobalMem(int *g_idata, int * g_odata, const int n);
 __global__ void reduceGlobalMemUnroll8(int *g_idata, int * g_odata, const int n);
+
 __global__ void reduceSharedMem(int *g_idata, int * g_odata, const int n);
 __global__ void reduceSharedMemUnroll8(int *g_idata, int * g_odata, const int n);
+__global__ void reduceSharedMemDynUnroll8(int *g_idata, int * g_odata, const int n);
 
 int main(int argc, char **argv) {
     int size = 1<<24, evenSize = size;
@@ -61,7 +64,7 @@ int main(int argc, char **argv) {
     reductionSum = interleavedPairReduce(h_idata_cpy, evenSize);
     end = clock();
     exeTime = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("\nCPU reduce:              execution time %.4f ms, result %d\n\n", exeTime * 1e3, reductionSum);
+    printf("\nCPU reduce: execution time %.4f ms, result %d\n\n", exeTime * 1e3, reductionSum);
 
     // allocate device memory
     int *d_idata, *d_odata;
@@ -87,27 +90,10 @@ int main(int argc, char **argv) {
     reductionSum = 0;
     CHECK(cudaMemcpy(h_odata, d_odata, grid.x * sizeof(int), cudaMemcpyDeviceToHost));
     for (int i = 0; i < grid.x; i++) reductionSum += h_odata[i];
-    printf("GPU baseline:                   execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
+    printf("GPU baseline:      execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
     CHECK(cudaGetLastError());
 
-    // 1.2 baseline - not using shared memory; x8 unrolling 
-    CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
-    CHECK(cudaMemset(d_odata, 0, grid.x * sizeof(int)));
-    memset(h_odata, 0, grid.x * sizeof(int));
-    start = clock();
-    // CUDA part
-    reduceGlobalMemUnroll8<<<grid.x / 8, block>>>(d_idata, d_odata, evenSize);
-    CHECK(cudaDeviceSynchronize());
-    end = clock();
-    exeTime = ((double) (end - start)) / CLOCKS_PER_SEC;
-    // Host part
-    reductionSum = 0;
-    CHECK(cudaMemcpy(h_odata, d_odata, grid.x / 8 * sizeof(int), cudaMemcpyDeviceToHost));
-    for (int i = 0; i < grid.x / 8; i++) reductionSum += h_odata[i];
-    printf("GPU baseline x8 unrolling:      execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
-    CHECK(cudaGetLastError());
-
-    // 2.1. using shared memory 
+    // using shared memory 
     CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
     CHECK(cudaMemset(d_odata, 0, grid.x * sizeof(int)));
     memset(h_odata, 0, grid.x * sizeof(int));
@@ -121,10 +107,27 @@ int main(int argc, char **argv) {
     reductionSum = 0;
     CHECK(cudaMemcpy(h_odata, d_odata, grid.x * sizeof(int), cudaMemcpyDeviceToHost));
     for (int i = 0; i < grid.x; i++) reductionSum += h_odata[i];
-    printf("GPU shared memory:              execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
+    printf("GPU shared memory: execution time %.4f ms, result %d\n\n", exeTime * 1e3, reductionSum);
     CHECK(cudaGetLastError());
 
-    // 2.2. using shared memory; x8 unrolling  
+    // baseline - not using shared memory + x8 unrolling 
+    CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
+    CHECK(cudaMemset(d_odata, 0, grid.x * sizeof(int)));
+    memset(h_odata, 0, grid.x * sizeof(int));
+    start = clock();
+    // CUDA part
+    reduceGlobalMemUnroll8<<<grid.x / 8, block>>>(d_idata, d_odata, evenSize);
+    CHECK(cudaDeviceSynchronize());
+    end = clock();
+    exeTime = ((double) (end - start)) / CLOCKS_PER_SEC;
+    // Host part
+    reductionSum = 0;
+    CHECK(cudaMemcpy(h_odata, d_odata, grid.x / 8 * sizeof(int), cudaMemcpyDeviceToHost));
+    for (int i = 0; i < grid.x / 8; i++) reductionSum += h_odata[i];
+    printf("GPU baseline x8 unrolling:              execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
+    CHECK(cudaGetLastError());
+
+    // using shared memory + x8 unrolling  
     CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
     CHECK(cudaMemset(d_odata, 0, grid.x * sizeof(int)));
     memset(h_odata, 0, grid.x * sizeof(int));
@@ -138,7 +141,24 @@ int main(int argc, char **argv) {
     reductionSum = 0;
     CHECK(cudaMemcpy(h_odata, d_odata, grid.x / 8 * sizeof(int), cudaMemcpyDeviceToHost));
     for (int i = 0; i < grid.x / 8; i++) reductionSum += h_odata[i];
-    printf("GPU shared memory x8 unrolling: execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
+    printf("GPU shared memory x8 unrolling:         execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
+    CHECK(cudaGetLastError());
+
+    // GPU dynamic shared memory + x8 unrolling  
+    CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
+    CHECK(cudaMemset(d_odata, 0, grid.x * sizeof(int)));
+    memset(h_odata, 0, grid.x * sizeof(int));
+    start = clock();
+    // CUDA part
+    reduceSharedMemDynUnroll8<<<grid.x / 8, block, BLOCKSIZE * sizeof(int)>>>(d_idata, d_odata, evenSize);
+    CHECK(cudaDeviceSynchronize());
+    end = clock();
+    exeTime = ((double) (end - start)) / CLOCKS_PER_SEC;
+    // Host part
+    reductionSum = 0;
+    CHECK(cudaMemcpy(h_odata, d_odata, grid.x / 8 * sizeof(int), cudaMemcpyDeviceToHost));
+    for (int i = 0; i < grid.x / 8; i++) reductionSum += h_odata[i];
+    printf("GPU dynamic shared memory x8 unrolling: execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
     CHECK(cudaGetLastError());
 
     // free host mem
@@ -319,6 +339,55 @@ __global__ void reduceSharedMem(int *g_idata, int * g_odata, const int n) {
 }
 
 __global__ void reduceSharedMemUnroll8(int *g_idata, int * g_odata, const int n) {
+    const int idx = blockIdx.x * blockDim.x * 8 + threadIdx.x;
+    if (idx >= n) return;
+    const int tid = threadIdx.x;
+
+    // unrolling 8
+    __shared__ int smem[BLOCKSIZE];
+    int temp = 0;
+    if (idx + 7 * blockDim.x < n) {
+        int a1 = g_idata[idx];
+        int a2 = g_idata[idx + blockDim.x];
+        int a3 = g_idata[idx + 2 * blockDim.x];
+        int a4 = g_idata[idx + 3 * blockDim.x];
+        int a5 = g_idata[idx + 4 * blockDim.x];
+        int a6 = g_idata[idx + 5 * blockDim.x];
+        int a7 = g_idata[idx + 6 * blockDim.x];
+        int a8 = g_idata[idx + 7 * blockDim.x];
+        temp = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8;
+    }
+    smem[tid] = temp;
+    __syncthreads();
+
+    // in-place reduction and complete unroll
+    if (blockDim.x >= 1024 && tid < 512) smem[tid] += smem[tid + 512];
+    __syncthreads();
+
+    if (blockDim.x >= 512 && tid < 256) smem[tid] += smem[tid + 256];
+    __syncthreads();
+
+    if (blockDim.x >= 256 && tid < 128) smem[tid] += smem[tid + 128];
+    __syncthreads();
+
+    if (blockDim.x >= 128 && tid < 64) smem[tid] += smem[tid + 64];
+    __syncthreads();
+
+    // unrolling warp
+    if (tid < 32) {
+        volatile int *vmem = smem;
+        vmem[tid] += vmem[tid + 32];
+        vmem[tid] += vmem[tid + 16];
+        vmem[tid] += vmem[tid +  8];
+        vmem[tid] += vmem[tid +  4];
+        vmem[tid] += vmem[tid +  2];
+        vmem[tid] += vmem[tid +  1];
+    }
+
+    if (tid == 0) g_odata[blockIdx.x] = smem[0];
+}
+
+__global__ void reduceSharedMemDynUnroll8(int *g_idata, int * g_odata, const int n) {
     const int idx = blockIdx.x * blockDim.x * 8 + threadIdx.x;
     if (idx >= n) return;
     const int tid = threadIdx.x;
