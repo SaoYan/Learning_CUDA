@@ -13,16 +13,16 @@
 void initialMatrix(float *ip, int nx, int ny);
 void checkResult(float *hostRef, float *gpuRef, const int nx, const int ny);
 
-void transposeHostRowCol(float *out, float *in, const int nx, const int ny);
-void transposeHostColRow(float *out, float *in, const int nx, const int ny);
+void transposeHostRowCol(float *in, float *out, const int nx, const int ny);
+void transposeHostColRow(float *in, float *out, const int nx, const int ny);
 
-__global__ void warmup(float *out, float *in, int nx, int ny);
+__global__ void warmup(float *in, float *out, int nx, int ny);
 
-__global__ void transposeRowCol(float *out, float *in, int nx, int ny);
-__global__ void transposeColRow(float *out, float *in, int nx, int ny);
+__global__ void transposeRowCol(float *in, float *out, int nx, int ny);
+__global__ void transposeColRow(float *in, float *out, int nx, int ny);
 
-__global__ void transposeDiagonalRowCol(float *out, float *in, const int nx, const int ny);
-__global__ void transposeDiagonalColRow(float *out, float *in, const int nx, const int ny);
+__global__ void transposeDiagonalRowCol(float *in, float *out, const int nx, const int ny);
+__global__ void transposeDiagonalColRow(float *in, float *out, const int nx, const int ny);
 
 int main(int argc, char **argv) {
     // set up device
@@ -60,7 +60,7 @@ int main(int argc, char **argv) {
     // transposeHostColRow(h_in, h_out, nx, ny);
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("transpose on CPU:             %f ms\n", time * 1000.0);
+    printf("transpose on CPU: %f ms\n", time * 1000.0);
 
     // allocate device memory
     float *d_in, *d_out;
@@ -76,7 +76,7 @@ int main(int argc, char **argv) {
     warmup<<<grid, block>>>(d_in, d_out, nx, ny);
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging!
 
-    // 1. execute kernel - read by row, store by col
+    // 1. read by row, store by col
     memset(h_out_gpu, 0.0, nBytes);
     CHECK(cudaMemset(d_out, 0.0, nBytes));
     start = clock();
@@ -88,7 +88,7 @@ int main(int argc, char **argv) {
     CHECK(cudaMemcpy(h_out_gpu, d_out, nBytes, cudaMemcpyDeviceToHost));
     checkResult(h_out, h_out_gpu, nx, ny);
 
-    // 2. execute kernel - read by col, store by row
+    // 2. read by col, store by row
     memset(h_out_gpu, 0.0, nBytes);
     CHECK(cudaMemset(d_out, 0.0, nBytes));
     start = clock();
@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
     CHECK(cudaMemcpy(h_out_gpu, d_out, nBytes, cudaMemcpyDeviceToHost));
     checkResult(h_out, h_out_gpu, nx, ny);
 
-    // 3. execute kernel - read by col, store by row
+    // 3. diagonal coordinate; read by col, store by row
     memset(h_out_gpu, 0.0, nBytes);
     CHECK(cudaMemset(d_out, 0.0, nBytes));
     start = clock();
@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
     CHECK(cudaMemcpy(h_out_gpu, d_out, nBytes, cudaMemcpyDeviceToHost));
     checkResult(h_out, h_out_gpu, nx, ny);
 
-    // 4. execute kernel - read by col, store by row
+    // 4. diagonal coordinate; read by col, store by row
     memset(h_out_gpu, 0.0, nBytes);
     CHECK(cudaMemset(d_out, 0.0, nBytes));
     start = clock();
@@ -139,7 +139,7 @@ int main(int argc, char **argv) {
 
 /**********CUDA kernels**********/
 
-__global__ void warmup(float *out, float *in, int nx, int ny) {
+__global__ void warmup(float *in, float *out, int nx, int ny) {
     int ix = blockDim.x * blockIdx.x + threadIdx.x;
     int iy = blockDim.y * blockIdx.y + threadIdx.y;
     if (ix < nx && iy < ny) {
@@ -147,7 +147,7 @@ __global__ void warmup(float *out, float *in, int nx, int ny) {
     }
 }
 
-__global__ void transposeRowCol(float *out, float *in, int nx, int ny) {
+__global__ void transposeRowCol(float *in, float *out, int nx, int ny) {
     int ix = blockDim.x * blockIdx.x + threadIdx.x;
     int iy = blockDim.y * blockIdx.y + threadIdx.y;
     if (ix < nx && iy < ny) {
@@ -155,7 +155,7 @@ __global__ void transposeRowCol(float *out, float *in, int nx, int ny) {
     }
 }
 
-__global__ void transposeColRow(float *out, float *in, int nx, int ny) {
+__global__ void transposeColRow(float *in, float *out, int nx, int ny) {
     int ix = blockDim.x * blockIdx.x + threadIdx.x;
     int iy = blockDim.y * blockIdx.y + threadIdx.y;
     if (ix < nx && iy < ny) {
@@ -163,7 +163,7 @@ __global__ void transposeColRow(float *out, float *in, int nx, int ny) {
     }
 }
 
-__global__ void transposeDiagonalRowCol(float *out, float *in, const int nx, const int ny) {
+__global__ void transposeDiagonalRowCol(float *in, float *out, const int nx, const int ny) {
     int blk_x = (blockIdx.x + blockIdx.y) % gridDim.x;
     int blk_y = blockIdx.x;
 
@@ -175,7 +175,7 @@ __global__ void transposeDiagonalRowCol(float *out, float *in, const int nx, con
     }
 }
 
-__global__ void transposeDiagonalColRow(float *out, float *in, const int nx, const int ny) {
+__global__ void transposeDiagonalColRow(float *in, float *out, const int nx, const int ny) {
     int blk_x = (blockIdx.x + blockIdx.y) % gridDim.x;
     int blk_y = blockIdx.x;
 
@@ -190,7 +190,7 @@ __global__ void transposeDiagonalColRow(float *out, float *in, const int nx, con
 /**********host functions**********/
 
 // read by rows (coalesced access); store by columns (strided access)
-void transposeHostRowCol(float *out, float *in, const int nx, const int ny) { 
+void transposeHostRowCol(float *in, float *out, const int nx, const int ny) { 
     for (int iy = 0; iy < ny; ++iy) {
         for (int ix = 0; ix < nx; ++ix) { 
             out[ix * ny + iy] = in[iy * nx + ix];
@@ -199,7 +199,7 @@ void transposeHostRowCol(float *out, float *in, const int nx, const int ny) {
 }
 
 // read by columns (strided access); store by rows (coalesced access)
-void transposeHostColRow(float *out, float *in, const int nx, const int ny) { 
+void transposeHostColRow(float *in, float *out, const int nx, const int ny) { 
     for (int ix = 0; ix < nx; ++ix) {
         for (int iy = 0; iy < ny; ++iy) { 
             out[ix * ny + iy] = in[iy * nx + ix];
@@ -221,7 +221,7 @@ void checkResult(float *hostRef, float *gpuRef, const int nx, const int ny) {
         for (int ix = 0; ix < nx; ++ix) { 
             int idx = ix * ny + iy;
             if (abs(hostRef[idx] - gpuRef[idx]) > epsilon) {
-                printf("different on (ix %d, iy %d): host %f gpu %f\n", 
+                printf("different on (x %d, y %d): host %f gpu %f\n", 
                     ix, iy, hostRef[idx], gpuRef[idx]);
                 break;
             }

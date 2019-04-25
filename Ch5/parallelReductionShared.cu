@@ -17,8 +17,6 @@ int naiveReduce(int *data, int size);
 int neighboredPairReduce(int *data, const int size);
 int interleavedPairReduce(int *data, const int size);
 
-__global__ void warmup(int *g_idata, int * g_odata, const int n);
-
 __global__ void reduceGlobalMem(int *g_idata, int * g_odata, const int n);
 __global__ void reduceGlobalMemUnroll8(int *g_idata, int * g_odata, const int n);
 
@@ -70,11 +68,6 @@ int main(int argc, char **argv) {
     int *d_idata, *d_odata;
     CHECK(cudaMalloc((int**)&d_idata, nBytes));
     CHECK(cudaMalloc((int**)&d_odata, grid.x * sizeof(int)));
-
-    // warmup
-    warmup<<<grid.x, block>>>(d_idata, d_odata, evenSize);
-    CHECK(cudaDeviceSynchronize());
-    CHECK(cudaGetLastError());
 
     // 1.1 baseline - not using shared memory 
     CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
@@ -176,41 +169,6 @@ int main(int argc, char **argv) {
 }
 
 /**********CUDA kernels**********/
-
-__global__ void warmup(int *g_idata, int * g_odata, const int n) {
-    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n) return;
-    const int tid = threadIdx.x;
-
-    // convert global data pointer to the local pointer of this block
-    int *idata = g_idata + blockIdx.x * blockDim.x;
-
-    // in-place reduction and complete unroll
-    if (blockDim.x >= 1024 && tid < 512) idata[tid] += idata[tid + 512];
-    __syncthreads();
-
-    if (blockDim.x >= 512 && tid < 256) idata[tid] += idata[tid + 256];
-    __syncthreads();
-
-    if (blockDim.x >= 256 && tid < 128) idata[tid] += idata[tid + 128];
-    __syncthreads();
-
-    if (blockDim.x >= 128 && tid < 64) idata[tid] += idata[tid + 64];
-    __syncthreads();
-
-    // unrolling warp
-    if (tid < 32) {
-        volatile int *vmem = idata;
-        vmem[tid] += vmem[tid + 32];
-        vmem[tid] += vmem[tid + 16];
-        vmem[tid] += vmem[tid +  8];
-        vmem[tid] += vmem[tid +  4];
-        vmem[tid] += vmem[tid +  2];
-        vmem[tid] += vmem[tid +  1];
-    }
-
-    if (tid == 0) g_odata[blockIdx.x] = idata[0];
-}
 
 // baseline - not using shared memory
 __global__ void reduceGlobalMem(int *g_idata, int * g_odata, const int n) {
