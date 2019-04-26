@@ -11,7 +11,7 @@
 }                                                                            \
 
 #define RADIUS 4
-#define BLOCKSIZE 256
+#define BLOCKSIZE 128
 
 // coeffecient
 #define a0     0.00000f
@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
     CHECK(cudaSetDevice(dev));
 
     // set up data size
-    int isize = 1 << 11;
+    int isize = 1 << 24;
 
     size_t nBytes = (isize + 2 * RADIUS) * sizeof(float);
     printf("array size: %d\n", isize);
@@ -63,11 +63,10 @@ int main(int argc, char **argv) {
     CHECK(cudaMemcpyToSymbol(coef, h_coef, (RADIUS + 1) * sizeof(float)));
 
     // launch CUDA kernel
-    // cudaDeviceProp info;
-    // CHECK(cudaGetDeviceProperties(&info, 0));
+    cudaDeviceProp info;
+    CHECK(cudaGetDeviceProperties(&info, 0));
     dim3 block(BLOCKSIZE);
-    // dim3 grid(info.maxGridSize[0] < isize / block.x ? info.maxGridSize[0] : isize / block.x);
-    dim3 grid(isize / block.x);
+    dim3 grid(info.maxGridSize[0] < isize / block.x ? info.maxGridSize[0] : isize / block.x);
     printf("(grid, block) %d,%d \n", grid.x, block.x);
     stencilGPU<<<grid, block>>>(d_in + RADIUS, d_out + RADIUS, isize);
 
@@ -104,7 +103,7 @@ __global__ void stencilGPU(float *in, float *out, const int n) {
         }
         __syncthreads();
 
-        float tmp = 0.0f;
+        float tmp = coef[0];
         #pragma unroll
         for (int i = 1; i <= RADIUS; i++) {
             tmp += coef[i] * (smem[sidx + i] - smem[sidx - i]);
@@ -126,10 +125,10 @@ void initialData(float *ip, const int size) {
 void stencilHost(float *in, float *out, int isize)
 {
     for (int i = RADIUS; i <= isize; i++) {
-        out[i] = a1 * (in[i + 1] - in[i - 1])
-                    + a2 * (in[i + 2] - in[i - 2])
-                    + a3 * (in[i + 3] - in[i - 3])
-                    + a4 * (in[i + 4] - in[i - 4]);
+        out[i] = a0 + a1 * (in[i + 1] - in[i - 1])
+                + a2 * (in[i + 2] - in[i - 2])
+                + a3 * (in[i + 3] - in[i - 3])
+                + a4 * (in[i + 4] - in[i - 4]);
     }
 }
 
