@@ -267,7 +267,7 @@ __global__ void writeColReadColDynamicPad(int *out) {
     out[idx] = tile[colIdx];
 }
 
-/**********CUDA functions**********/
+/**********host functions**********/
 
 void printData(const char *msg, int *data, const int size) {
     printf("%s: ", msg);
