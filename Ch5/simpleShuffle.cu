@@ -10,12 +10,16 @@
     }                                                                        \
 }                                                                            \
 
-#define BDIMX 16
+#define BDIMX 32
 #define SEGM  4
+#define MASK 0xffffffff
 
 void printData(int *data, const int size);
 
-
+__global__ void shfl_broadcast(int *out, int *in, const int srcLane);
+__global__ void shfl_up(int *out, int *in, const int offset);
+__global__ void shfl_down(int *out, int *in, const int offset);
+__global__ void shfl_around(int *out, int *in, const int offset);
 
 int main(int argc, char **argv) {
     // set up device
@@ -47,6 +51,33 @@ int main(int argc, char **argv) {
     printf("broadcast\t\t: ");
     printData(h_out, nElem);
 
+    // Shift up within a warp
+    cudaMemset(d_out, 0, nBytes);
+    memset(h_out, 0, nBytes);
+    shfl_up<<<1, block>>>(d_out, d_in, 2);
+    CHECK(cudaGetLastError());
+    CHECK(cudaMemcpy(h_out, d_out, nBytes, cudaMemcpyDeviceToHost));
+    printf("shift up\t\t: ");
+    printData(h_out, nElem);
+
+    // Shift down within a warp
+    cudaMemset(d_out, 0, nBytes);
+    memset(h_out, 0, nBytes);
+    shfl_down<<<1, block>>>(d_out, d_in, 2);
+    CHECK(cudaGetLastError());
+    CHECK(cudaMemcpy(h_out, d_out, nBytes, cudaMemcpyDeviceToHost));
+    printf("shift down\t\t: ");
+    printData(h_out, nElem);
+
+    // Shift down around
+    cudaMemset(d_out, 0, nBytes);
+    memset(h_out, 0, nBytes);
+    shfl_around<<<1, block>>>(d_out, d_in, 2);
+    CHECK(cudaGetLastError());
+    CHECK(cudaMemcpy(h_out, d_out, nBytes, cudaMemcpyDeviceToHost));
+    printf("shift down\t\t: ");
+    printData(h_out, nElem);
+
     CHECK(cudaFree(d_in));
     CHECK(cudaFree(d_out));
     CHECK(cudaDeviceReset());
@@ -57,15 +88,33 @@ int main(int argc, char **argv) {
 
 void printData(int *data, const int size) {
     for (int i = 0; i < size; i++) {
-        printf("%d ", data[i]);
+        printf("%2d ", data[i]);
     }
     printf("\n");
 }
 
 /**********CUDA kernels**********/
 
-__global__ void shfl_broadcast(int *out, int*in, int srcLane) {
+__global__ void shfl_broadcast(int *out, int *in, const int srcLane) {
     int value = in[threadIdx.x];
-    value = __shfl(value, srcLane, blockDim.x);
+    value = __shfl_sync(MASK, value, srcLane, blockDim.x);
+    out[threadIdx.x] = value;
+}
+
+__global__ void shfl_up(int *out, int *in, const int offset) {
+    int value = in[threadIdx.x];
+    value = __shfl_up_sync(MASK, value, offset, blockDim.x);
+    out[threadIdx.x] = value;
+}
+
+__global__ void shfl_down(int *out, int *in, const int offset) {
+    int value = in[threadIdx.x];
+    value = __shfl_down_sync(MASK, value, offset, blockDim.x);
+    out[threadIdx.x] = value;
+}
+
+__global__ void shfl_around(int *out, int *in, const int offset) {
+    int value = in[threadIdx.x];
+    value = __shfl_sync(MASK, value, threadIdx.x + offset, blockDim.x);
     out[threadIdx.x] = value;
 }
