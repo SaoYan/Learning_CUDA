@@ -139,21 +139,3 @@ __global__ void shfl_around(int *out, int *in, const int offset) {
     out[threadIdx.x] = value;
 }
 
-__global__ void shfl_xor(int *out, int *in, const int laneMask) {
-    int value = in[threadIdx.x];
-    value = __shfl_xor_sync(MASK, value, laneMask, blockDim.x);
-    out[threadIdx.x] = value;
-}
-
-__global__ void shfl_xor_array(int *out, int *in, const int laneMask) {
-    int idx = threadIdx.x * SEGM;
-    int value[SEGM];
-    for (int i = 0; i < SEGM; i++) value[i] = in[idx + i];
-    
-    value[0] = __shfl_xor_sync(MASK, value[0], laneMask, BDIMX); 
-    value[1] = __shfl_xor_sync(MASK, value[1], laneMask, BDIMX); 
-    value[2] = __shfl_xor_sync(MASK, value[2], laneMask, BDIMX); 
-    value[3] = __shfl_xor_sync(MASK, value[3], laneMask, BDIMX);
-
-    for (int i = 0; i < SEGM; i++) out[idx + i] = value[i];
-}
