@@ -20,6 +20,8 @@ __global__ void shfl_broadcast(int *out, int *in, const int srcLane);
 __global__ void shfl_up(int *out, int *in, const int offset);
 __global__ void shfl_down(int *out, int *in, const int offset);
 __global__ void shfl_around(int *out, int *in, const int offset);
+__global__ void shfl_xor(int *out, int *in, const int laneMask);
+__global__ void shfl_xor_array(int *out, int *in, const int laneMask);
 
 int main(int argc, char **argv) {
     // set up device
@@ -75,7 +77,25 @@ int main(int argc, char **argv) {
     shfl_around<<<1, block>>>(d_out, d_in, 2);
     CHECK(cudaGetLastError());
     CHECK(cudaMemcpy(h_out, d_out, nBytes, cudaMemcpyDeviceToHost));
-    printf("shift down\t\t: ");
+    printf("shift down around\t: ");
+    printData(h_out, nElem);
+
+    // Butterfly exchange  
+    cudaMemset(d_out, 0, nBytes);
+    memset(h_out, 0, nBytes);
+    shfl_xor<<<1, block>>>(d_out, d_in, 1);
+    CHECK(cudaGetLastError());
+    CHECK(cudaMemcpy(h_out, d_out, nBytes, cudaMemcpyDeviceToHost));
+    printf("butterfly exchange\t: ");
+    printData(h_out, nElem);
+
+    // Butterfly exchange array  
+    cudaMemset(d_out, 0, nBytes);
+    memset(h_out, 0, nBytes);
+    shfl_xor_array<<<1, block.x / SEGM>>>(d_out, d_in, 1);
+    CHECK(cudaGetLastError());
+    CHECK(cudaMemcpy(h_out, d_out, nBytes, cudaMemcpyDeviceToHost));
+    printf("butterfly exchange\t: ");
     printData(h_out, nElem);
 
     CHECK(cudaFree(d_in));
@@ -117,4 +137,23 @@ __global__ void shfl_around(int *out, int *in, const int offset) {
     int value = in[threadIdx.x];
     value = __shfl_sync(MASK, value, threadIdx.x + offset, blockDim.x);
     out[threadIdx.x] = value;
+}
+
+__global__ void shfl_xor(int *out, int *in, const int laneMask) {
+    int value = in[threadIdx.x];
+    value = __shfl_xor_sync(MASK, value, laneMask, blockDim.x);
+    out[threadIdx.x] = value;
+}
+
+__global__ void shfl_xor_array(int *out, int *in, const int laneMask) {
+    int idx = threadIdx.x * SEGM;
+    int value[SEGM];
+    for (int i = 0; i < SEGM; i++) value[i] = in[idx + i];
+    
+    value[0] = __shfl_xor_sync(MASK, value[0], laneMask, BDIMX); 
+    value[1] = __shfl_xor_sync(MASK, value[1], laneMask, BDIMX); 
+    value[2] = __shfl_xor_sync(MASK, value[2], laneMask, BDIMX); 
+    value[3] = __shfl_xor_sync(MASK, value[3], laneMask, BDIMX);
+
+    for (int i = 0; i < SEGM; i++) out[idx + i] = value[i];
 }
