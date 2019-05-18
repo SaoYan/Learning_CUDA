@@ -22,6 +22,7 @@ __global__ void shfl_down(int *out, int *in, const int offset);
 __global__ void shfl_around(int *out, int *in, const int offset);
 __global__ void shfl_xor(int *out, int *in, const int laneMask);
 __global__ void shfl_xor_array(int *out, int *in, const int laneMask);
+__global__ void shfl_swap(int *out, int *in, const int laneMask, int index);
 
 int main(int argc, char **argv) {
     // set up device
@@ -98,6 +99,15 @@ int main(int argc, char **argv) {
     printf("butterfly exchange\t: ");
     printData(h_out, nElem);
 
+    // Exchange values using array indices
+    cudaMemset(d_out, 0, nBytes);
+    memset(h_out, 0, nBytes);
+    shfl_swap<<<1, block.x / SEGM>>>(d_out, d_in, 1, 3);
+    CHECK(cudaGetLastError());
+    CHECK(cudaMemcpy(h_out, d_out, nBytes, cudaMemcpyDeviceToHost));
+    printf("value exchange\t\t: ");
+    printData(h_out, nElem);
+
     CHECK(cudaFree(d_in));
     CHECK(cudaFree(d_out));
     CHECK(cudaDeviceReset());
@@ -154,6 +164,16 @@ __global__ void shfl_xor_array(int *out, int *in, const int laneMask) {
     value[1] = __shfl_xor_sync(MASK, value[1], laneMask, BDIMX); 
     value[2] = __shfl_xor_sync(MASK, value[2], laneMask, BDIMX); 
     value[3] = __shfl_xor_sync(MASK, value[3], laneMask, BDIMX);
+
+    for (int i = 0; i < SEGM; i++) out[idx + i] = value[i];
+}
+
+__global__ void shfl_swap(int *out, int *in, const int laneMask, int index) {
+    int idx = threadIdx.x * SEGM;
+    int value[SEGM];
+    for (int i = 0; i < SEGM; i++) value[i] = in[idx + i];
+
+    value[index] = __shfl_xor_sync(MASK, value[index], laneMask, BDIMX);
 
     for (int i = 0; i < SEGM; i++) out[idx + i] = value[i];
 }
