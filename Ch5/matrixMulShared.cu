@@ -60,7 +60,7 @@ int main(int argc, char **argv) {
     matrixMulHost(hA, hB, hC);
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("\nmatrix multiplication on CPU: %f ms\n", time * 1000.0);
+    printf("\nmatrix multiplication on CPU\t: %f ms\n", time * 1000.0);
 
     // allocate device memory
     Matrix dA = initialMatrixDevice(hA, 1);
@@ -76,7 +76,7 @@ int main(int argc, char **argv) {
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("matrix multiplication on CPU: %f ms\n", time * 1000.0);
+    printf("matrix multiplication on GPU\t: %f ms\n", time * 1000.0);
     CHECK(cudaMemcpy(hC_gpu.array, dC.array, nBytes, cudaMemcpyDeviceToHost));
     checkResult(hC, hC_gpu);
 
@@ -88,7 +88,7 @@ int main(int argc, char **argv) {
     CHECK(cudaDeviceSynchronize()); // synchronize kernel only for debugging
     end = clock();
     time = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("matrix multiplication on CPU: %f ms\n", time * 1000.0);
+    printf("matrix multiplication on GPU + shared memory: %f ms\n", time * 1000.0);
     CHECK(cudaMemcpy(hC_gpu.array, dC.array, nBytes, cudaMemcpyDeviceToHost));
     checkResult(hC, hC_gpu);
 
