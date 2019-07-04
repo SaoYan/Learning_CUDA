@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
     CHECK(cudaMalloc((int**)&d_idata, nBytes));
     CHECK(cudaMalloc((int**)&d_odata, grid.x * sizeof(int)));
 
-    // 1.1 baseline - not using shared memory 
+    // 1. baseline - not using shared memory 
     CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
     CHECK(cudaMemset(d_odata, 0, grid.x * sizeof(int)));
     memset(h_odata, 0, grid.x * sizeof(int));
@@ -86,7 +86,7 @@ int main(int argc, char **argv) {
     printf("GPU baseline:      execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
     CHECK(cudaGetLastError());
 
-    // using shared memory 
+    // 2. using shared memory 
     CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
     CHECK(cudaMemset(d_odata, 0, grid.x * sizeof(int)));
     memset(h_odata, 0, grid.x * sizeof(int));
@@ -103,7 +103,7 @@ int main(int argc, char **argv) {
     printf("GPU shared memory: execution time %.4f ms, result %d\n\n", exeTime * 1e3, reductionSum);
     CHECK(cudaGetLastError());
 
-    // baseline - not using shared memory + x8 unrolling 
+    // 3. baseline - not using shared memory + x8 unrolling 
     CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
     CHECK(cudaMemset(d_odata, 0, grid.x * sizeof(int)));
     memset(h_odata, 0, grid.x * sizeof(int));
@@ -120,7 +120,7 @@ int main(int argc, char **argv) {
     printf("GPU baseline x8 unrolling:              execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
     CHECK(cudaGetLastError());
 
-    // using shared memory + x8 unrolling  
+    // 4. using shared memory + x8 unrolling  
     CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
     CHECK(cudaMemset(d_odata, 0, grid.x * sizeof(int)));
     memset(h_odata, 0, grid.x * sizeof(int));
@@ -170,7 +170,6 @@ int main(int argc, char **argv) {
 
 /**********CUDA kernels**********/
 
-// baseline - not using shared memory
 __global__ void reduceGlobalMem(int *g_idata, int * g_odata, const int n) {
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n) return;
@@ -351,7 +350,7 @@ __global__ void reduceSharedMemDynUnroll8(int *g_idata, int * g_odata, const int
     const int tid = threadIdx.x;
 
     // unrolling 8
-    __shared__ int smem[BLOCKSIZE];
+    extern __shared__ int smem[];
     int temp = 0;
     if (idx + 7 * blockDim.x < n) {
         int a1 = g_idata[idx];
