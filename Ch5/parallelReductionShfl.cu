@@ -19,7 +19,8 @@ int neighboredPairReduce(int *data, const int size);
 int interleavedPairReduce(int *data, const int size);
 
 __global__ void reduceSharedMem(int *g_idata, int * g_odata, const int n);
-__global__ void reduceShfl (int *g_idata, int *g_odata, const int n);
+__global__ void reduceWarpShfl(int *g_idata, int *g_odata, const int n);
+__global__ void reduceSmemShfl(int *g_idata, int *g_odata, const int n);
 
 int main(int argc, char **argv) {
     int size = 1<<24, evenSize = size;
@@ -66,12 +67,13 @@ int main(int argc, char **argv) {
     CHECK(cudaMalloc((int**)&d_idata, nBytes));
     CHECK(cudaMalloc((int**)&d_odata, grid.x * sizeof(int)));
 
+    // 1. using shared memory 
     CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
     CHECK(cudaMemset(d_odata, 0, grid.x * sizeof(int)));
     memset(h_odata, 0, grid.x * sizeof(int));
     start = clock();
     // CUDA part
-    reduceShfl<<<grid.x, block>>>(d_idata, d_odata, evenSize);
+    reduceSharedMem<<<grid.x, block>>>(d_idata, d_odata, evenSize);
     CHECK(cudaDeviceSynchronize());
     end = clock();
     exeTime = ((double) (end - start)) / CLOCKS_PER_SEC;
@@ -79,7 +81,41 @@ int main(int argc, char **argv) {
     reductionSum = 0;
     CHECK(cudaMemcpy(h_odata, d_odata, grid.x * sizeof(int), cudaMemcpyDeviceToHost));
     for (int i = 0; i < grid.x; i++) reductionSum += h_odata[i];
-    printf("GPU warp shuffle: execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
+    printf("GPU shared memory:                          execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
+    CHECK(cudaGetLastError());
+
+    // 2. reduce each warp using warp shuffle
+    CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
+    CHECK(cudaMemset(d_odata, 0, grid.x * sizeof(int)));
+    memset(h_odata, 0, grid.x * sizeof(int));
+    start = clock();
+    // CUDA part
+    reduceWarpShfl<<<grid.x, block>>>(d_idata, d_odata, evenSize);
+    CHECK(cudaDeviceSynchronize());
+    end = clock();
+    exeTime = ((double) (end - start)) / CLOCKS_PER_SEC;
+    // Host part
+    reductionSum = 0;
+    CHECK(cudaMemcpy(h_odata, d_odata, grid.x * sizeof(int), cudaMemcpyDeviceToHost));
+    for (int i = 0; i < grid.x; i++) reductionSum += h_odata[i];
+    printf("reduce each warp via warp shuffle:          execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
+    CHECK(cudaGetLastError());
+
+    // 3. only reduce the last warp using warp shuffle
+    CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
+    CHECK(cudaMemset(d_odata, 0, grid.x * sizeof(int)));
+    memset(h_odata, 0, grid.x * sizeof(int));
+    start = clock();
+    // CUDA part
+    reduceSmemShfl<<<grid.x, block>>>(d_idata, d_odata, evenSize);
+    CHECK(cudaDeviceSynchronize());
+    end = clock();
+    exeTime = ((double) (end - start)) / CLOCKS_PER_SEC;
+    // Host part
+    reductionSum = 0;
+    CHECK(cudaMemcpy(h_odata, d_odata, grid.x * sizeof(int), cudaMemcpyDeviceToHost));
+    for (int i = 0; i < grid.x; i++) reductionSum += h_odata[i];
+    printf("only reduce the last warp via warp shuffle: execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
     CHECK(cudaGetLastError());
 
     // free host mem
@@ -114,13 +150,10 @@ __global__ void reduceSharedMem(int *g_idata, int * g_odata, const int n) {
     // in-place reduction and complete unroll
     if (blockDim.x >= 1024 && tid < 512) smem[tid] += smem[tid + 512];
     __syncthreads();
-
     if (blockDim.x >= 512 && tid < 256) smem[tid] += smem[tid + 256];
     __syncthreads();
-
     if (blockDim.x >= 256 && tid < 128) smem[tid] += smem[tid + 128];
     __syncthreads();
-
     if (blockDim.x >= 128 && tid < 64) smem[tid] += smem[tid + 64];
     __syncthreads();
 
@@ -147,12 +180,12 @@ __inline__ __device__ int warpReduce(int localSum) {
     return localSum;
 }
 
-__global__ void reduceShfl (int *g_idata, int *g_odata, const int n) {
-    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void reduceWarpShfl(int *g_idata, int *g_odata, const int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n) return;
 
     // shared memory for each warp sum
-    __shared__ int smem[BLOCKSIZE/32];
+    __shared__ int smem[BLOCKSIZE / 32];
 
     // calculate lane index and warp index
     int laneIdx = threadIdx.x % warpSize;
@@ -165,13 +198,50 @@ __global__ void reduceShfl (int *g_idata, int *g_odata, const int n) {
     if (laneIdx == 0) smem[warpIdx] = localSum;
     __syncthreads();
 
-    // last warp reduce
+    /**naive way: loop over smem and sum the values**/
+    // localSum = 0;
+    // for (int i = 0; i < BLOCKSIZE / 32; i++) localSum += smem[i];
+    /**alternative way: cal warp shuffle one more time**/
     if (threadIdx.x < warpSize) 
-        localSum = (threadIdx.x < BLOCKSIZE/warpSize) ? smem[laneIdx] : 0;
+        localSum = (threadIdx.x < BLOCKSIZE / warpSize) ? smem[laneIdx] : 0;
     if (warpIdx == 0) localSum = warpReduce(localSum);
 
     // write result for this block to global mem
     if (threadIdx.x == 0) g_odata[blockIdx.x] = localSum;
+}
+
+__global__ void reduceSmemShfl(int *g_idata, int *g_odata, const int n) {
+    int tid = threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+
+    int *idata = g_idata + blockIdx.x * blockDim.x;
+
+    __shared__ int smem[BLOCKSIZE];
+    smem[tid] = idata[tid];
+    __syncthreads();
+
+    // in-place reduction in shared memory
+    if (blockDim.x >= 1024 && tid < 512) smem[tid] += smem[tid + 512];
+    __syncthreads();
+    if (blockDim.x >= 512 && tid < 256) smem[tid] += smem[tid + 256];
+    __syncthreads();
+    if (blockDim.x >= 256 && tid < 128) smem[tid] += smem[tid + 128];
+    __syncthreads();
+    if (blockDim.x >= 128 && tid < 64)  smem[tid] += smem[tid + 64];
+    __syncthreads();
+    if (blockDim.x >= 64 && tid < 32)  smem[tid] += smem[tid + 32];
+    __syncthreads();
+
+    int localSum = smem[tid];
+    localSum += __shfl_xor_sync(MASK, localSum, 16);
+    localSum += __shfl_xor_sync(MASK, localSum, 8);
+    localSum += __shfl_xor_sync(MASK, localSum, 4);
+    localSum += __shfl_xor_sync(MASK, localSum, 2);
+    localSum += __shfl_xor_sync(MASK, localSum, 1);
+
+    // write result for this block to global mem
+    if (tid == 0) g_odata[blockIdx.x] = localSum; //smem[0];
 }
 
 /**********host functions**********/
