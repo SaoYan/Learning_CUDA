@@ -7,3 +7,4 @@ Reference:
 * [CUDA documentation](https://docs.nvidia.com/cuda/)  
 * [CUDA Programming guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html)  
 * [NVIDIA Developer Blog - CUDA Beginners](https://devblogs.nvidia.com/tag/beginner/)  
+* [CUDA-enabled GPUs](https://developer.nvidia.com/cuda-gpus)  
