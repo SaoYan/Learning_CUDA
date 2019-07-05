@@ -11,11 +11,15 @@
 }                                                                            \
 
 #define BLOCKSIZE 256
+#define MASK 0xffffffff
 
 void initialData(int *ip, const int size);
 int naiveReduce(int *data, int size);
 int neighboredPairReduce(int *data, const int size);
 int interleavedPairReduce(int *data, const int size);
+
+__global__ void reduceSharedMem(int *g_idata, int * g_odata, const int n);
+__global__ void reduceShfl (int *g_idata, int *g_odata, const int n);
 
 int main(int argc, char **argv) {
     int size = 1<<24, evenSize = size;
@@ -62,6 +66,22 @@ int main(int argc, char **argv) {
     CHECK(cudaMalloc((int**)&d_idata, nBytes));
     CHECK(cudaMalloc((int**)&d_odata, grid.x * sizeof(int)));
 
+    CHECK(cudaMemcpy(d_idata, h_idata, nBytes, cudaMemcpyHostToDevice));
+    CHECK(cudaMemset(d_odata, 0, grid.x * sizeof(int)));
+    memset(h_odata, 0, grid.x * sizeof(int));
+    start = clock();
+    // CUDA part
+    reduceShfl<<<grid.x, block>>>(d_idata, d_odata, evenSize);
+    CHECK(cudaDeviceSynchronize());
+    end = clock();
+    exeTime = ((double) (end - start)) / CLOCKS_PER_SEC;
+    // Host part
+    reductionSum = 0;
+    CHECK(cudaMemcpy(h_odata, d_odata, grid.x * sizeof(int), cudaMemcpyDeviceToHost));
+    for (int i = 0; i < grid.x; i++) reductionSum += h_odata[i];
+    printf("GPU warp shuffle: execution time %.4f ms, result %d\n", exeTime * 1e3, reductionSum);
+    CHECK(cudaGetLastError());
+
     // free host mem
     free(h_idata);
     free(h_odata);
@@ -76,6 +96,83 @@ int main(int argc, char **argv) {
     return 0;
 }
 
+/**********CUDA kernels**********/
+
+__global__ void reduceSharedMem(int *g_idata, int * g_odata, const int n) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+    const int tid = threadIdx.x;
+
+    // convert global data pointer to the local pointer of this block
+    int *idata = g_idata + blockIdx.x * blockDim.x;
+
+    // shared memory
+    __shared__ int smem[BLOCKSIZE];
+    smem[tid] = idata[tid];
+    __syncthreads();
+
+    // in-place reduction and complete unroll
+    if (blockDim.x >= 1024 && tid < 512) smem[tid] += smem[tid + 512];
+    __syncthreads();
+
+    if (blockDim.x >= 512 && tid < 256) smem[tid] += smem[tid + 256];
+    __syncthreads();
+
+    if (blockDim.x >= 256 && tid < 128) smem[tid] += smem[tid + 128];
+    __syncthreads();
+
+    if (blockDim.x >= 128 && tid < 64) smem[tid] += smem[tid + 64];
+    __syncthreads();
+
+    // unrolling warp
+    if (tid < 32) {
+        volatile int *vmem = smem;
+        vmem[tid] += vmem[tid + 32];
+        vmem[tid] += vmem[tid + 16];
+        vmem[tid] += vmem[tid +  8];
+        vmem[tid] += vmem[tid +  4];
+        vmem[tid] += vmem[tid +  2];
+        vmem[tid] += vmem[tid +  1];
+    }
+
+    if (tid == 0) g_odata[blockIdx.x] = smem[0];
+}
+
+__inline__ __device__ int warpReduce(int localSum) {
+    localSum += __shfl_xor_sync(MASK, localSum, 16);
+    localSum += __shfl_xor_sync(MASK, localSum, 8);
+    localSum += __shfl_xor_sync(MASK, localSum, 4);
+    localSum += __shfl_xor_sync(MASK, localSum, 2);
+    localSum += __shfl_xor_sync(MASK, localSum, 1);
+    return localSum;
+}
+
+__global__ void reduceShfl (int *g_idata, int *g_odata, const int n) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+
+    // shared memory for each warp sum
+    __shared__ int smem[BLOCKSIZE/32];
+
+    // calculate lane index and warp index
+    int laneIdx = threadIdx.x % warpSize;
+    int warpIdx = threadIdx.x / warpSize;
+
+    // blcok-wide warp reduce
+    int localSum = warpReduce(g_idata[idx]);
+
+    // save warp sum to shared memory
+    if (laneIdx == 0) smem[warpIdx] = localSum;
+    __syncthreads();
+
+    // last warp reduce
+    if (threadIdx.x < warpSize) 
+        localSum = (threadIdx.x < BLOCKSIZE/warpSize) ? smem[laneIdx] : 0;
+    if (warpIdx == 0) localSum = warpReduce(localSum);
+
+    // write result for this block to global mem
+    if (threadIdx.x == 0) g_odata[blockIdx.x] = localSum;
+}
 
 /**********host functions**********/
 
